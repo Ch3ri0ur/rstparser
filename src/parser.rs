@@ -29,77 +29,100 @@ pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize
                       .map_or(text.len() - directive_body_start_index, |pos| pos);
         let arguments = text[directive_body_start_index..directive_body_start_index + line_end].trim().to_string();
         
-        // Get lines *after* the directive declaration line itself.
-        // The first line of `text[directive_body_start_index..]` is often the rest of the directive line (e.g., just a newline).
-        // `skip(1)` ensures we start with the line *after* the `.. name::` line.
-        // let mut lines_iter = text[directive_body_start_index..].lines().skip(1).peekable();
-
         let mut block_indentation: Option<usize> = None;
 
         // Find the block indentation (indentation of the first non-empty line after the directive line)
         // Use a temporary peekable iterator to find the block indentation without consuming lines
         let mut temp_lines_iter = text[directive_body_start_index..].lines().skip(1).peekable();
         while let Some(line_str) = temp_lines_iter.next() {
-             let trimmed_line = line_str.trim();
-             if !trimmed_line.is_empty() && !(trimmed_line.starts_with(".. ") && trimmed_line.contains("::")) {
-                 // Found the first non-empty, non-directive line. Its indentation sets the block indentation.
-                 block_indentation = Some(line_str.chars().take_while(|c| c.is_whitespace()).count());
-                 break;
-             }
+            let trimmed_line_for_indent_check = line_str.trim_start();
+            if !trimmed_line_for_indent_check.is_empty() {
+                block_indentation = Some(line_str.len() - trimmed_line_for_indent_check.len());
+                break;
+            }
         }
 
-        // Now process the lines from the beginning, using the determined block indentation
-        let lines_iter = text[directive_body_start_index..].lines().skip(1); // Recreate iterator
+        let mut lines_iter = text[directive_body_start_index..].lines().skip(1).peekable();
 
-        for line_str in lines_iter {
-            let original_line_for_content = line_str.to_string();
+        while let Some(line_str) = lines_iter.next() {
+            let original_line_for_content = line_str.to_string(); // Keep original for content
+            let current_indentation = line_str.len() - line_str.trim_start().len();
             let trimmed_line = line_str.trim();
-            let current_indentation = line_str.chars().take_while(|c| c.is_whitespace()).count();
 
-            if in_options {
-                if trimmed_line.is_empty() {
-                    // Empty line signifies end of options, start of content.
-                    in_options = false;
-                    // Don't add this specific empty line to content yet,
-                    // it just marks transition. Next non-empty line will be content.
-                    continue;
-                }
-
-                // Check if the line has the correct block indentation AND looks like an option
-                if block_indentation.map_or(false, |indent| current_indentation == indent) && trimmed_line.starts_with(':') {
+            if in_options { // If still in options mode at the start of this line's processing
+                if trimmed_line.starts_with(':') { // Is it an option line?
+                    let option_line_indentation = current_indentation;
                     let mut parts_iter = trimmed_line[1..].splitn(2, ':');
-                    if let (Some(key_str), Some(value_str)) = (parts_iter.next(), parts_iter.next())
-                    {
+                    if let (Some(key_str), Some(value_str)) = (parts_iter.next(), parts_iter.next()) {
                         let key = key_str.trim().to_string();
-                        let value = value_str.trim().to_string();
-                        if !key.is_empty() {
-                            options.insert(key, value);
-                            // Successfully parsed an option. Continue to the next line for more options.
-                            continue;
-                        }
-                    }
-                }
+                        let mut value_parts = vec![value_str.trim_start().to_string()];
 
-                // If we reached here, the line was not a valid option (wrong indentation, malformed, or not an option line).
-                // Transition to content mode. This current line IS the first line of content.
-                in_options = false;
-                // Fall through to content processing for the current line.
+                        // Check for multiline continuations
+                        loop {
+                            match lines_iter.peek() {
+                                Some(next_line_peek_str) => {
+                                    let next_line_original = *next_line_peek_str;
+                                    let next_line_indent = next_line_original.len() - next_line_original.trim_start().len();
+                                    let next_trimmed_line = next_line_original.trim();
+
+                                    if !next_trimmed_line.is_empty() && next_line_indent > option_line_indentation {
+                                        value_parts.push(next_trimmed_line.to_string());
+                                        lines_iter.next(); // Consume this line
+                                    } else {
+                                        break; // Not a continuation line
+                                    }
+                                }
+                                None => {
+                                    break; // No more lines
+                                }
+                            }
+                        }
+                        
+                        let final_value = if value_parts.len() > 1 && value_parts[0].is_empty() {
+                            value_parts[1..].join("\n")
+                        } else {
+                            value_parts.join("\n")
+                        };
+                        options.insert(key, final_value);
+                        continue; // Successfully parsed an option, move to next line
+                    } else {
+                        // Malformed option line (e.g., ":key" without a second colon or just ":")
+                        // This line is not a valid option. It becomes the first line of content.
+                        in_options = false;
+                        // DO NOT continue. Fall through to add this line as content.
+                    }
+                } else { // Not starting with ':'
+                    in_options = false; // Options phase is over.
+                    if trimmed_line.is_empty() {
+                        // This was a blank line terminating options. Don't add it to content_lines.
+                        continue; // Move to the next line, which will be the first potential content line.
+                    }
+                    // else: It's a non-empty, non-option line. This IS the first content line.
+                    // DO NOT continue. Fall through to add this line as content.
+                }
             }
 
-            // At this point, in_options is false (either started false or transitioned).
-            // This line is potential content.
+            // If !in_options (either from a previous iteration, or flipped above by a non-option line,
+            // or by a malformed option line):
+            // The current line_str is processed as content.
+            // (We `continue`d if it was a blank line that flipped in_options, so those are skipped here)
+
             // Check if this line is the start of another directive.
             if trimmed_line.starts_with(".. ") && trimmed_line.contains("::") {
-                break; // Stop if we encounter another directive.
+                break; 
             }
             
-            // Only add lines that have the correct indentation or are empty
-            // This helps avoid including text that's not part of the directive's content
-            if block_indentation.map_or(false, |indent| current_indentation >= indent) || trimmed_line.is_empty() {
+            // Determine if the line belongs to the current directive's content based on indentation.
+            let part_of_content_block = block_indentation.map_or(
+                true, // If no block_indentation established (e.g. empty directive body), consider line as content unless it's a new directive
+                |indent| current_indentation >= indent || trimmed_line.is_empty()
+            );
+
+            if part_of_content_block {
                 content_lines.push(original_line_for_content);
-            } else {
-                // If we encounter a line with less indentation than the block,
-                // it's likely not part of this directive's content
+            } else if !trimmed_line.is_empty() {
+                // Line is not empty and has less indentation than required for the content block.
+                // This signifies the end of the current directive's content.
                 break;
             }
         }
@@ -121,8 +144,8 @@ pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize
             .into_iter()
             .map(|line| {
                 if line.trim().is_empty() {
-                    // Keep empty lines as they are
-                    line
+                    // Normalize whitespace-only lines to an actual empty string
+                    "".to_string()
                 } else {
                     match min_indent {
                         Some(indent) => {
@@ -709,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiline_option_unsupported() {
+    fn test_multiline_option_supported() {
         let rst = r#"
 .. mydirective::
     :option1: value1
@@ -719,16 +742,37 @@ mod tests {
     Content.
     "#;
         let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        // The current parser does not support multiline options.
-        // The line "  second line of value1" and subsequent lines should be treated as content.
-        let expected_content = "    second line of value1\n:option2: value2\n\nContent.";
+        options.insert("option1".to_string(), "value1\nsecond line of value1".to_string());
+        options.insert("option2".to_string(), "value2".to_string());
         assert_directive_eq(
             parse_rst(rst, "mydirective"),
             "mydirective",
             "",
             options,
-            expected_content,
+            "Content.",
+        );
+    }
+
+    #[test]
+    fn test_multiline_option_empty_first_line() {
+        let rst = r#"
+.. mydirective::
+    :option1:
+        indented line1
+        indented line2
+    :option2: value2
+
+    Content.
+    "#;
+        let mut options = HashMap::new();
+        options.insert("option1".to_string(), "indented line1\nindented line2".to_string());
+        options.insert("option2".to_string(), "value2".to_string());
+        assert_directive_eq(
+            parse_rst(rst, "mydirective"),
+            "mydirective",
+            "",
+            options,
+            "Content.",
         );
     }
     
