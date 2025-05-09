@@ -37,17 +37,23 @@ fn dedent_lines(lines: Vec<String>) -> String {
     if processed_lines.is_empty() {
         return String::new();
     }
+    // Remove empty lines from the beginning and end of the result
+    while processed_lines.first().map_or(false, |line| line.trim().is_empty()) {
+        processed_lines.remove(0);
+    }
+    while processed_lines.last().map_or(false, |line| line.trim().is_empty()) {
+        processed_lines.pop();
+    }
+    
 
     let mut result = String::new();
     for (i, line) in processed_lines.iter().enumerate() {
+        
         result.push_str(line);
         if i < processed_lines.len() - 1 {
             result.push('\n');
         }
     }
-    // If the last processed line was empty, and it wasn't the only line,
-    // the above loop doesn't add a trailing newline.
-    // This behavior is what the tests seem to expect for individual blocks.
     result
 }
 
@@ -460,7 +466,7 @@ Block one
     }
 
     #[test]
-    fn test_python_rst_with_optional_newlines() {
+    fn test_python_rst_with_optional_newlines_which_should_be_removed() {
         let content = r#"
 """
 @rst
@@ -533,13 +539,6 @@ impl RstExtractor {
                             
                             let mut processed_block_str = block_content_raw;
 
-                            // Refined optional newline stripping:
-                            // Check for leading newline (and potential preceding spaces on that line, though tests don't show this)
-                            if processed_block_str.starts_with('\n') {
-                                processed_block_str = &processed_block_str[1..];
-                            } else if processed_block_str.starts_with("\r\n") {
-                                processed_block_str = &processed_block_str[2..];
-                            }
                             // Check for trailing newline (and potential following spaces on that line)
                             // This needs to be done *after* leading newline is stripped if both are present.
                             if processed_block_str.ends_with('\n') {

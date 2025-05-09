@@ -68,7 +68,7 @@ fn benchmark_extract_from_cpp(c: &mut Criterion) {
     group.finish();
 }
 
-fn benchmark_extract_from_python_regex(c: &mut Criterion) {
+fn benchmark_extract_from_python(c: &mut Criterion) {
     let mut group = c.benchmark_group("extract_from_python_regex");
 
     group.bench_function("small_py_regex", |b| {
@@ -81,65 +81,12 @@ fn benchmark_extract_from_python_regex(c: &mut Criterion) {
     group.finish();
 }
 
-fn benchmark_extract_from_cpp_manual(c: &mut Criterion) {
-    let mut group = c.benchmark_group("extract_from_cpp_manual");
 
-    group.bench_function("small_cpp_manual", |b| {
-        b.iter(|| RstExtractor::extract_from_cpp_manual(black_box(CPP_CONTENT_SMALL)))
-    });
-
-    group.bench_function("medium_cpp_manual", |b| {
-        b.iter(|| RstExtractor::extract_from_cpp_manual(black_box(CPP_CONTENT_MEDIUM)))
-    });
-    group.finish();
-}
-
-fn benchmark_extract_from_python_manual(c: &mut Criterion) {
-    let mut group = c.benchmark_group("extract_from_python_manual");
-
-    group.bench_function("small_py_manual", |b| {
-        b.iter(|| RstExtractor::extract_from_python_manual(black_box(PY_CONTENT_SMALL)))
-    });
-
-    group.bench_function("medium_py_manual", |b| {
-        b.iter(|| RstExtractor::extract_from_python_manual(black_box(PY_CONTENT_MEDIUM)))
-    });
-    group.finish();
-}
-
-fn benchmark_extract_from_cpp_basic(c: &mut Criterion) {
-    let mut group = c.benchmark_group("extract_from_cpp_basic");
-
-    group.bench_function("small_cpp_basic", |b| {
-        b.iter(|| RstExtractor::extract_from_cpp_basic(black_box(CPP_CONTENT_SMALL)))
-    });
-
-    group.bench_function("medium_cpp_basic", |b| {
-        b.iter(|| RstExtractor::extract_from_cpp_basic(black_box(CPP_CONTENT_MEDIUM)))
-    });
-    group.finish();
-}
-
-fn benchmark_extract_from_python_basic(c: &mut Criterion) {
-    let mut group = c.benchmark_group("extract_from_python_basic");
-
-    group.bench_function("small_py_basic", |b| {
-        b.iter(|| RstExtractor::extract_from_python_basic(black_box(PY_CONTENT_SMALL)))
-    });
-
-    group.bench_function("medium_py_basic", |b| {
-        b.iter(|| RstExtractor::extract_from_python_basic(black_box(PY_CONTENT_MEDIUM)))
-    });
-    group.finish();
-}
 
 criterion_group!(
     benches,
     benchmark_extract_from_cpp,
-    benchmark_extract_from_python_regex,
-    benchmark_extract_from_cpp_manual,
-    benchmark_extract_from_python_manual,
-    benchmark_extract_from_cpp_basic,
-    benchmark_extract_from_python_basic
+    benchmark_extract_from_python,
+
 );
 criterion_main!(benches);
