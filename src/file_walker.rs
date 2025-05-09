@@ -13,7 +13,7 @@ impl FileWalker {
     /// Create a new FileWalker with default settings
     pub fn new() -> Self {
         FileWalker {
-            extensions: vec!["rst".to_string()], // Default to .rst files
+            extensions: vec!["rst".to_string(), "cpp".to_string(), "py".to_string()], // Default to .rst, .cpp, and .py files
             max_depth: None,                     // No depth limit by default
         }
     }

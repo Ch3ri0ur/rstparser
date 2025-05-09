@@ -4,6 +4,7 @@ use std::error::Error;
 use rayon::prelude::*;
 use crate::parser::parse_rst_multiple;
 use crate::aggregator::DirectiveWithSource;
+use crate::extractor::RstExtractor;
 
 /// A struct to process RST files and find directives
 pub struct Processor {
@@ -23,11 +24,14 @@ impl Processor {
         let file_path = file_path.as_ref();
         let content = fs::read_to_string(file_path)?;
         
+        // Extract RST content based on file extension
+        let rst_content = RstExtractor::extract_from_file(file_path, &content);
+        
         // Convert target_directives from Vec<String> to Vec<&str> for parse_rst_multiple
         let target_directives_refs: Vec<&str> = self.target_directives.iter().map(|s| s.as_str()).collect();
         
         // Parse the file content to find directives with line numbers
-        let directives_with_lines = parse_rst_multiple(&content, &target_directives_refs);
+        let directives_with_lines = parse_rst_multiple(&rst_content, &target_directives_refs);
         
         // Convert to DirectiveWithSource
         let source_file = file_path.to_string_lossy().to_string();

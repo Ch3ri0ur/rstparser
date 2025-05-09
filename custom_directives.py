@@ -12,6 +12,16 @@ class mydirective(Directive):
         return []
 
 class my_directive_name(Directive):
+    """
+    @rst
+    .. mydirective:: arg1 arg2
+         :option1: value1
+         :option2: value2
+    
+         This is the content of the directive.
+    
+    @endrst
+    """
     has_content = True
     required_arguments = 0
     optional_arguments = 0

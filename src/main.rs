@@ -2,6 +2,7 @@ mod parser;
 mod file_walker;
 mod aggregator;
 mod processor;
+mod extractor;
 
 use std::path::PathBuf;
 use std::process;
