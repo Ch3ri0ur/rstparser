@@ -218,3 +218,107 @@ def some_function():
     assert_eq!(result[0].directive.content, "Content for directive1.");
     assert_eq!(result[1].directive.content, "Content for directive2.");
 }
+
+#[test]
+fn test_multiline_option_as_last_option_in_cpp() {
+    // Create a temporary directory
+    let temp_dir = tempdir().unwrap();
+    let file_path = temp_dir.path().join("test_multiline_option.cpp");
+    
+    // Create a test C++ file with a multiline option as the last option
+    // Using a different format for the multiline option
+    let cpp_content = r#"
+/// @rst
+/// .. mydirective::
+///    :option1: value1
+///    :option2: indented line1
+///             indented line2
+///
+///    Content after multiline option.
+/// @endrst
+"#;
+    
+    // Print the raw content for debugging
+    println!("Original C++ content: {:?}", cpp_content);
+    
+    File::create(&file_path).unwrap().write_all(cpp_content.as_bytes()).unwrap();
+    
+    // Create processor to find the directive
+    let processor = Processor::new(vec!["mydirective".to_string()]);
+    let result = processor.process_file(&file_path).unwrap();
+    
+    // Should find 1 directive
+    assert_eq!(result.len(), 1);
+    
+    // Check directive name
+    assert_eq!(result[0].directive.name, "mydirective");
+    
+    // Debug output
+    println!("Options: {:?}", result[0].directive.options);
+    println!("Content: {:?}", result[0].directive.content);
+    
+    // Extract the raw RST content to debug
+    let raw_content = rstparser::extractor::RstExtractor::extract_from_cpp(cpp_content);
+    println!("Raw extracted content: {:?}", raw_content);
+    
+    // Extract the raw RST content
+    let raw_content = rstparser::extractor::RstExtractor::extract_from_cpp(cpp_content);
+    
+    // Manually parse the raw content to debug the issue
+    let parsed_result = rstparser::parser::parse_rst(&raw_content, "mydirective");
+    println!("Manually parsed options: {:?}", parsed_result.as_ref().map(|(d, _)| &d.options));
+    
+    // Check options
+    assert_eq!(result[0].directive.options.get("option1").unwrap(), "value1");
+    assert_eq!(result[0].directive.options.get("option2").unwrap(), "indented line1\nindented line2");
+    
+    // Check content
+    assert_eq!(result[0].directive.content, "Content after multiline option.");
+}
+
+#[test]
+fn test_multiline_option_as_last_option_in_python() {
+    // Create a temporary directory
+    let temp_dir = tempdir().unwrap();
+    let file_path = temp_dir.path().join("test_multiline_option.py");
+    
+    // Create a test Python file with a multiline option as the last option
+    let py_content = r#"
+def some_function():
+    """
+    @rst
+    .. mydirective::
+       :option1: value1
+       :option2:
+           indented line1
+           indented line2
+           
+       Content after multiline option.
+    @endrst
+    """
+    pass
+"#;
+    
+    File::create(&file_path).unwrap().write_all(py_content.as_bytes()).unwrap();
+    
+    // Create processor to find the directive
+    let processor = Processor::new(vec!["mydirective".to_string()]);
+    let result = processor.process_file(&file_path).unwrap();
+    
+    // Should find 1 directive
+    assert_eq!(result.len(), 1);
+    
+    // Check directive name
+    assert_eq!(result[0].directive.name, "mydirective");
+    
+    // Debug output
+    println!("Python Options: {:?}", result[0].directive.options);
+    println!("Python Content: {:?}", result[0].directive.content);
+    
+    // Check options
+    assert_eq!(result[0].directive.options.get("option1").unwrap(), "value1");
+    assert_eq!(result[0].directive.options.get("option2").unwrap(), "indented line1\nindented line2");
+    
+    // Check content
+    assert_eq!(result[0].directive.content, "Content after multiline option.");
+}

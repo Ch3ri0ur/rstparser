@@ -19,7 +19,7 @@ impl RstExtractor {
     }
 
     /// Extract RST content from C++ files (between @rst and @endrst in /// comments)
-    fn extract_from_cpp(content: &str) -> String {
+    pub fn extract_from_cpp(content: &str) -> String {
         let mut result = String::new();
         
         // Match sequences of /// comments that contain @rst and @endrst markers
@@ -48,38 +48,51 @@ impl RstExtractor {
 
     /// Process RST content from C++ comments by removing /// prefixes and handling indentation
     fn process_cpp_rst_content(content: &str) -> String {
-        // Remove /// prefixes and handle indentation
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Find minimum indentation (ignoring empty lines)
-        // We don't actually use this, but it's here for consistency with the Python version
-        let _min_indent = lines.iter()
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| {
-                if let Some(_stripped) = line.trim_start().strip_prefix("///") {
-                    Some(line.len() - line.trim_start().len())
-                } else {
-                    None
+        let raw_lines: Vec<&str> = content.lines().collect();
+
+        if raw_lines.is_empty() {
+            return String::new();
+        }
+
+        // Step 1 & 2: Strip C++ comment prefixes (e.g., "/// ", "///") and leading whitespace before them
+        let stripped_lines: Vec<String> = raw_lines.iter()
+            .map(|&line| {
+                let mut current_line = line.trim_start(); // Strip whitespace before ///
+                // Remove all leading slashes from the already trimmed line
+                while current_line.starts_with('/') {
+                    current_line = &current_line[1..];
                 }
+                // After removing slashes, any space immediately following "///" is preserved
+                // as part of the RST content's own indentation.
+                current_line.to_string()
             })
+            .collect();
+
+        // Step 3: Calculate common minimum indentation from the stripped lines
+        let min_indent = stripped_lines.iter()
+            .filter(|line_str| !line_str.trim().is_empty()) // Exclude lines that are now empty or only whitespace
+            .map(|line_str| line_str.len() - line_str.trim_start().len()) // Indentation of the string after slash stripping
             .min()
             .unwrap_or(0);
-        
-        // Process each line
-        let processed_lines: Vec<String> = lines.iter()
-            .map(|line| {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
+
+        // Step 4: Remove common minimum indentation from stripped lines
+        let processed_lines: Vec<String> = stripped_lines.iter()
+            .map(|line_str| {
+                if line_str.trim().is_empty() {
+                    // For lines that became empty (or were whitespace-only) after initial stripping,
+                    // ensure they are truly empty in the final output.
                     String::new()
-                } else if let Some(stripped) = line.trim_start().strip_prefix("///") {
-                    stripped.trim_start().to_string()
                 } else {
-                    trimmed.to_string()
+                    // Calculate current leading whitespace length for this line_str
+                    let current_indent = line_str.len() - line_str.trim_start().len();
+                    // Determine how many spaces to actually remove
+                    let num_spaces_to_remove = std::cmp::min(current_indent, min_indent);
+                    line_str[num_spaces_to_remove..].to_string()
                 }
             })
             .collect();
-        
-        // Trim leading and trailing empty lines
+
+        // Step 5 & 6: Join, trim, and return
         let mut result = processed_lines.join("\n");
         result = result.trim().to_string();
         
@@ -87,7 +100,7 @@ impl RstExtractor {
     }
 
     /// Extract RST content from Python files (between @rst and @endrst in """ docstrings)
-    fn extract_from_python(content: &str) -> String {
+    pub fn extract_from_python(content: &str) -> String {
         let mut result = String::new();
         
         // Match any triple-quoted docstring that contains @rst and @endrst markers
@@ -117,30 +130,37 @@ impl RstExtractor {
 
     /// Process RST content from Python docstrings by handling indentation
     fn process_python_rst_content(content: &str) -> String {
-        // Handle indentation by finding the minimum indentation level
-        let lines: Vec<&str> = content.lines().collect();
+        // Step 1: Get raw lines from the content
+        let raw_lines: Vec<&str> = content.lines().collect();
         
-        // Find minimum indentation (ignoring empty lines)
-        let min_indent = lines.iter()
+        if raw_lines.is_empty() {
+            return String::new();
+        }
+
+        // Step 2: Calculate common minimum indentation from raw lines
+        // (ignoring empty lines or lines with only whitespace)
+        let min_indent = raw_lines.iter()
             .filter(|line| !line.trim().is_empty())
             .map(|line| line.len() - line.trim_start().len())
             .min()
             .unwrap_or(0);
         
-        // Remove the minimum indentation from each line
-        let processed_lines: Vec<String> = lines.iter()
-            .map(|line| {
-                if line.trim().is_empty() {
-                    String::new()
-                } else if line.len() > min_indent {
-                    line[min_indent..].to_string()
+        // Step 3: Remove common minimum indentation from each line
+        let processed_lines: Vec<String> = raw_lines.iter()
+            .map(|line_str| { // line_str is &str
+                if line_str.trim().is_empty() {
+                    String::new() // Preserve intentionally empty lines as empty
                 } else {
-                    line.trim_start().to_string()
+                    // Determine current indentation for this specific line
+                    let current_indent = line_str.len() - line_str.trim_start().len();
+                    // Calculate how many spaces to actually remove (cannot remove more than it has)
+                    let num_spaces_to_remove = std::cmp::min(current_indent, min_indent);
+                    line_str[num_spaces_to_remove..].to_string()
                 }
             })
             .collect();
         
-        // Trim leading and trailing empty lines
+        // Step 4: Join processed lines, trim leading/trailing empty lines from the whole block, and return
         let mut result = processed_lines.join("\n");
         result = result.trim().to_string();
         
