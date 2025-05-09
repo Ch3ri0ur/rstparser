@@ -1,173 +1,3 @@
-// Re-export RstExtractor from the library crate
-pub use regex::Regex;
-use std::path::Path;
-use std::ffi::OsStr;
-
-/// A struct to extract RST content from different file types
-pub struct RstExtractor;
-
-impl RstExtractor {
-    /// Extract RST content from a file based on its extension
-    pub fn extract_from_file<P: AsRef<Path>>(file_path: P, content: &str) -> String {
-        let file_path = file_path.as_ref();
-        
-        match file_path.extension().and_then(OsStr::to_str) {
-            Some("cpp") => Self::extract_from_cpp(content),
-            Some("py") => Self::extract_from_python(content),
-            _ => content.to_string(), // For .rst files, use the content as is
-        }
-    }
-
-    /// Extract RST content from C++ files (between @rst and @endrst in /// comments)
-    pub fn extract_from_cpp(content: &str) -> String {
-        let mut result = String::new();
-        
-        // Match sequences of /// comments that contain @rst and @endrst markers
-        // This pattern looks for:
-        // 1. A line with /// that contains @rst
-        // 2. Followed by any content until
-        // 3. A line with /// that contains @endrst
-        let re = Regex::new(r"(?s)///\s*@rst\b(.*?)///\s*@endrst\b").unwrap();
-        
-        for cap in re.captures_iter(content) {
-            if let Some(rst_block) = cap.get(1) {
-                // Process the captured RST content
-                let processed_block = Self::process_cpp_rst_content(rst_block.as_str());
-                
-                // Add a separator if we already have content
-                if !result.is_empty() {
-                    result.push_str("\n\n");
-                }
-                
-                result.push_str(&processed_block);
-            }
-        }
-        
-        result
-    }
-
-    /// Process RST content from C++ comments by removing /// prefixes and handling indentation
-    fn process_cpp_rst_content(content: &str) -> String {
-        let raw_lines: Vec<&str> = content.lines().collect();
-
-        if raw_lines.is_empty() {
-            return String::new();
-        }
-
-        // Step 1 & 2: Strip C++ comment prefixes (e.g., "/// ", "///") and leading whitespace before them
-        let stripped_lines: Vec<String> = raw_lines.iter()
-            .map(|&line| {
-                let mut current_line = line.trim_start(); // Strip whitespace before ///
-                // Remove all leading slashes from the already trimmed line
-                while current_line.starts_with('/') {
-                    current_line = &current_line[1..];
-                }
-                // After removing slashes, any space immediately following "///" is preserved
-                // as part of the RST content's own indentation.
-                current_line.to_string()
-            })
-            .collect();
-
-        // Step 3: Calculate common minimum indentation from the stripped lines
-        let min_indent = stripped_lines.iter()
-            .filter(|line_str| !line_str.trim().is_empty()) // Exclude lines that are now empty or only whitespace
-            .map(|line_str| line_str.len() - line_str.trim_start().len()) // Indentation of the string after slash stripping
-            .min()
-            .unwrap_or(0);
-
-        // Step 4: Remove common minimum indentation from stripped lines
-        let processed_lines: Vec<String> = stripped_lines.iter()
-            .map(|line_str| {
-                if line_str.trim().is_empty() {
-                    // For lines that became empty (or were whitespace-only) after initial stripping,
-                    // ensure they are truly empty in the final output.
-                    String::new()
-                } else {
-                    // Calculate current leading whitespace length for this line_str
-                    let current_indent = line_str.len() - line_str.trim_start().len();
-                    // Determine how many spaces to actually remove
-                    let num_spaces_to_remove = std::cmp::min(current_indent, min_indent);
-                    line_str[num_spaces_to_remove..].to_string()
-                }
-            })
-            .collect();
-
-        // Step 5 & 6: Join, trim, and return
-        let mut result = processed_lines.join("\n");
-        result = result.trim().to_string();
-        
-        result
-    }
-
-    /// Extract RST content from Python files (between @rst and @endrst in """ docstrings)
-    pub fn extract_from_python(content: &str) -> String {
-        let mut result = String::new();
-        
-        // Match any triple-quoted docstring that contains @rst and @endrst markers
-        // This pattern looks for:
-        // 1. Triple quotes (""")
-        // 2. Any content until @rst
-        // 3. Capture everything between @rst and @endrst
-        // 4. Any content until the closing triple quotes
-        let re = Regex::new(r#"(?s)""".*?@rst\b(.*?)@endrst\b.*?""""#).unwrap();
-        
-        for cap in re.captures_iter(content) {
-            if let Some(rst_block) = cap.get(1) {
-                // Process the captured RST content
-                let processed_block = Self::process_python_rst_content(rst_block.as_str());
-                
-                // Add a separator if we already have content
-                if !result.is_empty() {
-                    result.push_str("\n\n");
-                }
-                
-                result.push_str(&processed_block);
-            }
-        }
-        
-        result
-    }
-
-    /// Process RST content from Python docstrings by handling indentation
-    fn process_python_rst_content(content: &str) -> String {
-        // Step 1: Get raw lines from the content
-        let raw_lines: Vec<&str> = content.lines().collect();
-        
-        if raw_lines.is_empty() {
-            return String::new();
-        }
-
-        // Step 2: Calculate common minimum indentation from raw lines
-        // (ignoring empty lines or lines with only whitespace)
-        let min_indent = raw_lines.iter()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| line.len() - line.trim_start().len())
-            .min()
-            .unwrap_or(0);
-        
-        // Step 3: Remove common minimum indentation from each line
-        let processed_lines: Vec<String> = raw_lines.iter()
-            .map(|line_str| { // line_str is &str
-                if line_str.trim().is_empty() {
-                    String::new() // Preserve intentionally empty lines as empty
-                } else {
-                    // Determine current indentation for this specific line
-                    let current_indent = line_str.len() - line_str.trim_start().len();
-                    // Calculate how many spaces to actually remove (cannot remove more than it has)
-                    let num_spaces_to_remove = std::cmp::min(current_indent, min_indent);
-                    line_str[num_spaces_to_remove..].to_string()
-                }
-            })
-            .collect();
-        
-        // Step 4: Join processed lines, trim leading/trailing empty lines from the whole block, and return
-        let mut result = processed_lines.join("\n");
-        result = result.trim().to_string();
-        
-        result
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,13 +17,23 @@ mod tests {
 /// More C++ code
 "#;
 
-        let expected = "This is RST content.\n\n* Item 1\n* Item 2";
-        assert_eq!(RstExtractor::extract_from_cpp(cpp_content), expected);
+        let expected = r#"This is RST content.
+
+* Item 1
+* Item 2"#;
+
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_content),
+            expected,
+            "Regex C++ failed"
+        )
     }
 
     #[test]
     fn test_extract_from_python() {
         let py_content = r#"
+"""Some Python comment"""
+
 def some_function():
     """
     Some Python docstring
@@ -210,8 +50,16 @@ def some_function():
     pass
 "#;
 
-        let expected = "This is RST content.\n\n* Item 1\n* Item 2";
-        assert_eq!(RstExtractor::extract_from_python(py_content), expected);
+        let expected = r"This is RST content.
+
+* Item 1
+* Item 2";
+
+        assert_eq!(
+            RstExtractor::extract_from_python(py_content),
+            expected,
+            "Regex Python failed"
+        );
     }
 
     #[test]
@@ -229,7 +77,35 @@ def some_function():
 "#;
 
         let expected = "First RST block\n\nSecond RST block";
-        assert_eq!(RstExtractor::extract_from_cpp(cpp_content), expected);
+
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_content),
+            expected,
+            "Regex C++ multiple blocks failed"
+        );
+    }
+
+    #[test]
+    fn test_non_uniform_comments_in_cpp() {
+        let cpp_content = r#"
+// @rst
+/// First RST block
+// @endrst
+///
+/// Some code
+///
+ // @rst
+/// Second RST block
+/// @endrst
+"#;
+
+        let expected = "First RST block\n\nSecond RST block";
+
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_content),
+            expected,
+            "Regex C++ multiple blocks failed"
+        );
     }
 
     #[test]
@@ -246,11 +122,265 @@ def some_function():
     @rst
     Second RST block
     @endrst
+    @rst
+    Third RST block
+    @endrst
     """
     pass
 "#;
 
-        let expected = "First RST block\n\nSecond RST block";
-        assert_eq!(RstExtractor::extract_from_python(py_content), expected);
+        let expected = "First RST block\n\nSecond RST block\n\nThird RST block";
+
+        assert_eq!(
+            RstExtractor::extract_from_python(py_content),
+            expected,
+            "Regex Python multiple blocks failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_cpp_indentation() {
+        // Renamed from test_extract_from_cpp_basic
+        let cpp_content_standard = r#"
+/// Some C++ code
+/// 
+/// @rst
+/// This is RST content.
+/// 
+///  * Item 1
+///  * Item 2
+/// @endrst
+///
+/// More C++ code
+/// @rst
+/// Second block
+///  Indented.
+/// @endrst
+"#;
+        let expected_standard =
+            "This is RST content.\n\n * Item 1\n * Item 2\n\nSecond block\n Indented.";
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_content_standard),
+            expected_standard,
+            "Regex C++ standard case failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_cpp_single_line() {
+        let cpp_single_line_rst = r#"/// @rst Message @endrst"#;
+        let expected_single_line = "Message";
+
+        // This test is not necessariy. It is an optional edge case which can also be ignored.
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_single_line_rst),
+            expected_single_line,
+            "Manual C++ single line failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_cpp_variants() {
+        let cpp_content_mixed_indent = r#"
+        ///    @rst
+        ///      Line 1
+        ///    Line 2
+        /// @endrst
+        "#;
+        let expected_mixed_indent = "  Line 1\nLine 2";
+        assert_eq!(
+            RstExtractor::extract_from_cpp(cpp_content_mixed_indent),
+            expected_mixed_indent,
+            "Regex C++ mixed indent failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_variants() {
+        // Renamed from test_extract_from_python_basic
+        let py_content_standard = r#"
+def some_function():
+    """
+    Some Python docstring
+    
+    @rst
+    This is RST content.
+    
+    * Item 1
+    * Item 2
+    @endrst
+    
+    More docstring content
+    """
+    pass
+"#;
+        let expected_standard = "This is RST content.\n\n* Item 1\n* Item 2";
+        assert_eq!(
+            RstExtractor::extract_from_python(py_content_standard),
+            expected_standard,
+            "Regex Python standard case failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_multiple_one_docstring() {
+        let py_content_multiple_in_one_docstring = r#"
+def third_function():
+    """
+    @rst
+    Block one.
+    @endrst
+    Some text between.
+    @rst
+    Block two.
+    @endrst
+    """
+    pass
+"#;
+        let expected_multiple_in_one = "Block one.\n\nBlock two.";
+        // No longer a separate expectation for regex, it should now find all blocks.
+        // let expected_multiple_in_one_regex = "Block one.";
+
+        assert_eq!(
+            RstExtractor::extract_from_python(py_content_multiple_in_one_docstring),
+            expected_multiple_in_one,
+            "Regex Python multiple in one docstring failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_indentation() {
+        let py_content_multiple_docstrings = r#"
+"""
+@rst
+First RST block
+@endrst
+"""
+
+def some_function_multiple():
+    """
+    @rst
+    Second RST block
+      indented stuff
+    non indented
+    @endrst
+    """
+    pass
+"#;
+        let expected_multiple_docstrings =
+            "First RST block\n\nSecond RST block\n  indented stuff\nnon indented";
+        assert_eq!(
+            RstExtractor::extract_from_python(py_content_multiple_docstrings),
+            expected_multiple_docstrings,
+            "Regex Python multiple docstrings failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_marker_directly() {
+        let py_rst_ends_docstring = r#"
+"""@rst
+Content that ends with docstring
+@endrst""" 
+"#; // Added @endrst for manual and regex
+        let expected_ends_docstring = "Content that ends with docstring";
+        assert_eq!(
+            RstExtractor::extract_from_python(py_rst_ends_docstring),
+            expected_ends_docstring,
+            "Regex Python RST ends docstring failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_no_rst() {
+        let py_no_rst_in_docstring = r#"
+"""
+This is a docstring.
+No RST here.
+"""
+"#;
+        let expected_no_rst = "";
+        assert_eq!(
+            RstExtractor::extract_from_python(py_no_rst_in_docstring),
+            expected_no_rst,
+            "Regex Python no RST failed"
+        );
+    }
+
+    #[test]
+    fn test_extract_from_python_with_empty_lines() {
+        let py_rst_with_empty_lines_inside = r#"
+"""
+@rst
+Line 1
+
+Line 3
+@endrst
+
+stuff
+
+@rst
+        Line 1
+
+    Line 3
+@endrst
+"""
+"#;
+        let expected_empty_lines_inside = "Line 1\n\nLine 3\n\n    Line 1\n\nLine 3";
+        assert_eq!(
+            RstExtractor::extract_from_python(py_rst_with_empty_lines_inside),
+            expected_empty_lines_inside,
+            "Regex Python empty lines inside failed"
+        );
+    }
+
+    #[test]
+    fn test_cpp_empty_and_no_rst() {
+        // Renamed
+        let expected = "";
+        assert_eq!(
+            RstExtractor::extract_from_cpp(""),
+            expected,
+            "Regex C++ empty string failed"
+        );
+
+        assert_eq!(
+            RstExtractor::extract_from_cpp("/// no rst here"),
+            expected,
+            "Regex C++ no rst failed"
+        );
+
+        // For unterminated, all methods should ideally return empty or handle gracefully.
+        // It would good to throw a warning. in this case.
+        assert_eq!(
+            RstExtractor::extract_from_cpp("/// @rst unterminated"),
+            expected,
+            "Regex C++ unterminated failed"
+        );
+    }
+
+    #[test]
+    fn test_python_empty_and_no_rst() {
+        // Renamed
+        let expected = "";
+        assert_eq!(
+            RstExtractor::extract_from_python(""),
+            expected,
+            "Regex Python empty string failed"
+        );
+
+        assert_eq!(
+            RstExtractor::extract_from_python("\"\"\"no rst here\"\"\""),
+            expected,
+            "Regex Python no rst failed"
+        );
+
+        // For unterminated, all methods should return empty.
+        // method prints a warning.
+        assert_eq!(
+            RstExtractor::extract_from_python("\"\"\"@rst unterminated\"\"\""),
+            expected,
+            "Regex Python unterminated failed"
+        );
     }
 }
