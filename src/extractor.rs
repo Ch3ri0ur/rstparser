@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::ffi::OsStr;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,7 +143,6 @@ def some_function():
 
     #[test]
     fn test_extract_from_cpp_indentation() {
-        // Renamed from test_extract_from_cpp_basic
         let cpp_content_standard = r#"
 /// Some C++ code
 /// 
@@ -197,7 +199,6 @@ def some_function():
 
     #[test]
     fn test_extract_from_python_variants() {
-        // Renamed from test_extract_from_python_basic
         let py_content_standard = r#"
 def some_function():
     """
@@ -238,8 +239,7 @@ def third_function():
     pass
 "#;
         let expected_multiple_in_one = "Block one.\n\nBlock two.";
-        // No longer a separate expectation for regex, it should now find all blocks.
-        // let expected_multiple_in_one_regex = "Block one.";
+
 
         assert_eq!(
             RstExtractor::extract_from_python(py_content_multiple_in_one_docstring),
@@ -282,7 +282,7 @@ def some_function_multiple():
 """@rst
 Content that ends with docstring
 @endrst""" 
-"#; // Added @endrst for manual and regex
+"#; 
         let expected_ends_docstring = "Content that ends with docstring";
         assert_eq!(
             RstExtractor::extract_from_python(py_rst_ends_docstring),
@@ -382,5 +382,55 @@ stuff
             expected,
             "Regex Python unterminated failed"
         );
+    }
+}
+
+pub struct RstExtractor;
+
+impl RstExtractor {
+    /// Extract RST content from a file based on its extension
+    pub fn extract_from_file<P: AsRef<Path>>(file_path: P, content: &str) -> String {
+        let file_path = file_path.as_ref();
+        
+        match file_path.extension().and_then(OsStr::to_str) {
+            Some("cpp") => Self::extract_from_cpp(content),
+            Some("py") => Self::extract_from_python(content),
+            _ => content.to_string(), // For .rst files, use the content as is
+        }
+    }
+
+
+    pub fn extract_from_python(content: &str) -> String {
+        let mut extracted_blocks = Vec::new();
+        let mut current_pos = 0;
+
+        // We need to find docstrings
+        // While in a docstring we need to find @rst
+        // while in a block we need to find @endrst
+        // once a block is found we need to uniformly dedent the lines (ignoring empty lines)
+        // repeat
+
+    
+        extracted_blocks.join("\n\n")
+    }
+
+    pub fn extract_from_cpp(content: &str) -> String {
+        let mut extracted_blocks = Vec::new();
+        let mut current_pos = 0;
+
+        // We need to find commented lines
+        // If we find uncommented code we reset
+        // Inside a commented block we need to find @rst
+        // while in a block we need to find @endrst
+        // once a block is found we need to 
+        // - remove all leading whitespaces
+        // - remove all leading '/' 
+        // - uniformly dedent the lines (ignoring empty lines)
+        // repeat
+
+        
+
+
+        extracted_blocks.join("\n\n")
     }
 }
