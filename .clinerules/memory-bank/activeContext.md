@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-- Refining incremental updates in file watching mode to prevent directive duplication.
+- Validating and testing the fix for directive duplication in file watching mode. The primary cause (inconsistent path handling) has been addressed.
 
 ## Recent Changes
 
@@ -15,12 +15,13 @@
 - Updated `src/aggregator.rs` with new methods (`aggregate_to_json_from_map`, `aggregate_map_to_json`) to work with the new data structure, and refactored existing aggregation logic into an internal helper.
 - Updated default file extensions in `src/main.rs` to `rst,py,cpp` to ensure correct processing of example files in watch mode.
 - Resolved a `unused_assignments` warning in `src/main.rs`.
+- Implemented consistent path canonicalization in `src/main.rs` for HashMap keys and internal path handling during initial scan and file events (Create, Modify, Remove) in watch mode. This resolves a bug where directives were duplicated due to mismatched path representations (e.g., relative vs. absolute).
 - Previous work involved fixing bugs in `src/parser.rs`.
 
 ## Next Steps
 
-- Test the file watching functionality thoroughly with various scenarios (create, modify, delete files/directories, rapid changes).
-- Update `.clinerules/memory-bank/progress.md` to reflect the fix for directive duplication and the new data structures.
+- Thoroughly test the file watching functionality with various scenarios (create, modify, delete files/directories with both relative and absolute paths, rapid changes) to confirm the path canonicalization fix robustly prevents directive duplication.
+- Update `.clinerules/memory-bank/progress.md` (completed).
 - Consider potential refinements like event debouncing or more efficient in-memory data structures for `current_directives_with_source` if performance issues arise with very large projects.
 - Confirm task completion.
 
@@ -29,8 +30,9 @@
 - Ensuring all memory bank files are consistent with the information available from the project structure and source code.
 - Adhering to the structure and purpose of each memory bank file as defined in `.clinerules/cline-memory-bank.md`.
 - Avoiding speculation for sections where reviewed files do not provide explicit information (e.g., "What's Left to Build" in `progress.md`).
-- Decided to use a `HashMap` keyed by `PathBuf` (for file) and then by a generated `DirectiveInstanceId` (String) to store `aggregator::DirectiveWithSource` objects, enabling efficient updates.
-- The `DirectiveInstanceId` prioritizes a user-defined `:id:` field in directive options, falling back to a generated ID (file path + name + line number).
+- Decided to use a `HashMap` keyed by canonicalized `PathBuf` (for file) and then by a generated `DirectiveInstanceId` (String) to store `aggregator::DirectiveWithSource` objects. This ensures consistent keying for efficient updates and prevents duplication due to path representation differences.
+- The `DirectiveInstanceId` prioritizes a user-defined `:id:` field in directive options, falling back to a generated ID (canonical file path + name + line number).
+- Ensured that `DirectiveWithSource` structs stored in the map also use canonical path strings for their `source_file` field for consistency.
 
 ## Important Patterns and Preferences
 

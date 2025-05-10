@@ -27,7 +27,7 @@ Far future:
 
 - A lsp server for (e.g. vscode) to support editing these directive blocks
     - to allow for autocomplete with links
-    - et.c
+    - etc.
 
 ## Project Goals
 

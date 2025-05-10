@@ -28,11 +28,12 @@
 - The project now builds successfully with these enhancements to the file watching feature.
 - Default file extensions for scanning and watching updated in `src/main.rs` to include `rst,py,cpp`, resolving an issue where example files were not processed correctly in watch mode.
 - Updated `Cargo.toml` with the `notify` dependency.
+- Addressed a bug in watch mode where original directives were duplicated after file changes due to inconsistent path representations; fixed by implementing consistent path canonicalization in `src/main.rs` for in-memory directive storage and event processing.
 - Memory bank files (`activeContext.md`, `progress.md`) are being updated to reflect these changes.
 
 ## Known Issues
 
-- The file watching functionality, while significantly improved to prevent directive duplication and now building correctly, is still new and requires comprehensive testing across various scenarios (create, modify, delete files/directories, rapid changes).
+- The file watching functionality has been improved by addressing a key directive duplication bug. However, it is still new and requires comprehensive testing across various scenarios (create, modify, delete files/directories, rapid changes) to ensure full robustness.
 - Potential for multiple event triggers for single file operations (may need debouncing in future).
 - Performance with very large numbers of files/directives in watch mode has not been benchmarked.
 - Previously identified bugs in `parse_rst_multiple` were addressed; their status is now considered resolved unless new issues arise from testing.
