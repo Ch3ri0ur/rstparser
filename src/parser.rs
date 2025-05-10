@@ -159,24 +159,6 @@ fn parse_directive_body(
     }
 }
 
-/// Parse a reStructuredText string and find the *first* occurrence of a specific directive.
-/// Returns the directive and its line number, or None if not found.
-pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize)> {
-    let directive_start_marker = format!(".. {}::", target_directive);
-    if let Some(marker_start_index) = text.find(&directive_start_marker) {
-        let line_number = text[..marker_start_index].lines().count() + 1;
-        let body_start_index = marker_start_index + directive_start_marker.len();
-        
-        let directive = parse_directive_body(
-            &text[body_start_index..],
-            target_directive.to_string(),
-        );
-        Some((directive, line_number))
-    } else {
-        None
-    }
-}
-
 // Helper function to check for valid directive name characters.
 // Directive names cannot contain spaces themselves.
 // Standard RST allows alphanumeric, hyphen, underscore, period.

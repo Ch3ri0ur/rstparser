@@ -1,0 +1,15 @@
+[
+  {
+    "directive": {
+      "name": "anotherdirective",
+      "arguments": "arg1 arg222",
+      "options": {
+        "option1": "value1sss",
+        "option2": "value2ssssd"
+      },
+      "content": "This is the content of the directsdaive.22asadad"
+    },
+    "source_file": "examples/custom_directives.py",
+    "line_number": 7
+  }
+]

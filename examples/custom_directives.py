@@ -15,11 +15,16 @@ class my_directive_name(Directive):
     """
     @rst
     .. mydirective:: arg1 arg2
-         :option1: value1
+         :option1: value1asdasds22
          :option2: value2
     
          This is the content of the directive.
     
+    .. anotherdirective:: arg1 arg222
+            :option1: value1sss
+            :option2: value2ssssd
+        
+            This is the content of the directsdaive.22asadad
     @endrst
     """
     has_content = True

@@ -1,8 +1,8 @@
 #include <iostream>
 /// @rst
-/// .. mydirective:: arg1 arg2
-///         :option1: value1
-///         :option2: value2
+/// .. mydirective:: arg1 arssg2ssdddddd
+///         :option1: value11dd2
+///         :option2: value22312sssdasdsdffdfsdfsdfasdasdsdfsd
 ///    
 ///         This is the content of the directive.
 /// @endrst

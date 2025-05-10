@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::error::Error;
 use serde::{Serialize, Deserialize};
 use crate::parser::Directive;
+use std::sync::{Arc, Mutex}; // Added Arc, Mutex
 
 /// A struct representing a directive with its source file information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,8 +40,8 @@ impl Aggregator {
         }
     }
 
-    /// Aggregate directives and write them to JSON files
-    pub fn aggregate_to_json(
+    /// Aggregate directives and write them to JSON files (internal helper)
+    fn aggregate_to_json_internal(
         &self,
         directives: Vec<DirectiveWithSource>,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -51,15 +52,11 @@ impl Aggregator {
         
         match self.group_by {
             GroupBy::DirectiveName => {
-                // Group directives by name
                 let mut grouped: HashMap<String, Vec<DirectiveWithSource>> = HashMap::new();
-                
                 for directive_with_source in directives {
                     let name = directive_with_source.directive.name.clone();
                     grouped.entry(name).or_insert_with(Vec::new).push(directive_with_source);
                 }
-                
-                // Write each group to a separate file
                 for (name, group) in grouped {
                     let file_path = self.output_dir.join(format!("{}.json", name));
                     fs::write(&file_path, serde_json::to_string_pretty(&group)?)?;
@@ -67,37 +64,67 @@ impl Aggregator {
                 }
             },
             GroupBy::All => {
-                // Write all directives to a single file
                 let file_path = self.output_dir.join("all_directives.json");
                 fs::write(&file_path, serde_json::to_string_pretty(&directives)?)?;
                 output_files.push(file_path);
             },
             GroupBy::SourceFile => {
-                // Group directives by source file
                 let mut grouped: HashMap<String, Vec<DirectiveWithSource>> = HashMap::new();
-                
                 for directive_with_source in directives {
                     let source_file = directive_with_source.source_file.clone();
                     grouped.entry(source_file).or_insert_with(Vec::new).push(directive_with_source);
                 }
-                
-                // Write each group to a separate file
                 for (source_file, group) in grouped {
-                    // Extract filename from path for the output file name
                     let file_name = Path::new(&source_file)
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or("unknown")
                         .to_string();
-                    
                     let file_path = self.output_dir.join(format!("{}.json", file_name));
                     fs::write(&file_path, serde_json::to_string_pretty(&group)?)?;
                     output_files.push(file_path);
                 }
             },
         }
-        
         Ok(output_files)
+    }
+
+    /// Original aggregate_to_json, now calls the internal helper
+    pub fn aggregate_to_json(
+        &self,
+        directives: Vec<DirectiveWithSource>,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        self.aggregate_to_json_internal(directives)
+    }
+
+    /// Aggregate directives from a map (Arc<Mutex<...>>) and write them to JSON files
+    pub fn aggregate_to_json_from_map(
+        &self,
+        directives_map_arc: Arc<Mutex<HashMap<PathBuf, HashMap<String, DirectiveWithSource>>>>,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        let directives_map = directives_map_arc.lock().unwrap();
+        let mut flat_directives: Vec<DirectiveWithSource> = Vec::new();
+        for file_map in directives_map.values() {
+            for dws in file_map.values() {
+                flat_directives.push(dws.clone()); // Clone as we are taking from behind a MutexGuard
+            }
+        }
+        drop(directives_map); // Release lock
+        self.aggregate_to_json_internal(flat_directives)
+    }
+
+    /// Aggregate directives from an owned map and write them to JSON files
+    pub fn aggregate_map_to_json(
+        &self,
+        directives_map: HashMap<PathBuf, HashMap<String, DirectiveWithSource>>,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        let mut flat_directives: Vec<DirectiveWithSource> = Vec::new();
+        for file_map in directives_map.values() {
+            for dws in file_map.values() {
+                flat_directives.push(dws.clone()); // Clone if DirectiveWithSource is not Copy
+            }
+        }
+        self.aggregate_to_json_internal(flat_directives)
     }
 }
 
