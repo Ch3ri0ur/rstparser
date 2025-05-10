@@ -487,9 +487,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "criterion",
- "once_cell",
  "rayon",
- "regex",
  "serde",
  "serde_json",
  "tempfile",
