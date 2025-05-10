@@ -13,11 +13,12 @@
 
 ## Current Status
 
-- (To be filled)
+- Attempted to fix two bugs in `src/parser.rs` within the `parse_rst_multiple` function related to directive name validation/newline handling and advancing the parsing position correctly. Verification pending `cargo test`.
 
 ## Known Issues
 
-- (To be filled)
+- Previously identified bugs in `parse_rst_multiple` (related to directive name validation and parsing position advancement) have been addressed; awaiting test confirmation.
+- (To be filled with other known issues if any)
 
 ## Evolution of Project Decisions
 

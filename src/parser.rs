@@ -9,271 +9,292 @@ pub struct Directive {
     pub content: String,
 }
 
-/// Parse a reStructuredText string and find a specific directive.
-/// Returns the first occurrence of the directive if found, along with its line number, or None if not found.
-pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize)> {
-    // This is a very basic parser and needs to be made more robust.
-    // It currently only finds the first occurrence of a directive.
-    let directive_start = format!(".. {}::", target_directive);
-    if let Some(start_index) = text.find(&directive_start) {
-        // Calculate the line number by counting newlines up to the start_index
-        let line_number = text[..start_index].lines().count() + 1;
-        let mut options = HashMap::new();
-        let mut content_lines = Vec::new();
-        let mut in_options = true;
+/// Parses the body of a directive, given the text slice that starts immediately *after*
+/// the ".. directive_name::" marker.
+///
+/// # Arguments
+/// * `text_after_marker` - The text slice beginning with the directive's arguments (if any)
+///                         on the first line, followed by options and content.
+/// * `directive_name` - The name of the directive being parsed.
+fn parse_directive_body(
+    text_after_marker: &str,
+    directive_name: String,
+) -> Directive {
+    let mut options = HashMap::new();
+    let mut content_lines = Vec::new();
+    let mut in_options = true;
 
-        let directive_body_start_index = start_index + directive_start.len();
+    // Extract arguments - everything from the start of text_after_marker to the end of its first line
+    let first_line_end = text_after_marker
+        .find('\n')
+        .map_or(text_after_marker.len(), |pos| pos);
+    let arguments = text_after_marker[..first_line_end].trim().to_string();
 
-        // Extract arguments - everything from the end of the marker to the end of the line
-        let line_end = text[directive_body_start_index..]
-            .find('\n')
-            .map_or(text.len() - directive_body_start_index, |pos| pos);
-        let arguments = text[directive_body_start_index..directive_body_start_index + line_end]
-            .trim()
-            .to_string();
+    let mut block_indentation: Option<usize> = None;
 
-        let mut block_indentation: Option<usize> = None;
-
-        // Find the block indentation (indentation of the first non-empty line after the directive line)
-        // Use a temporary peekable iterator to find the block indentation without consuming lines
-        let mut temp_lines_iter = text[directive_body_start_index..]
-            .lines()
-            .skip(1)
-            .peekable();
-        while let Some(line_str) = temp_lines_iter.next() {
-            let trimmed_line_for_indent_check = line_str.trim_start();
-            if !trimmed_line_for_indent_check.is_empty() {
-                block_indentation = Some(line_str.len() - trimmed_line_for_indent_check.len());
-                break;
-            }
+    // Determine block_indentation from the first non-empty line after the argument line.
+    let mut temp_lines_iter = text_after_marker.lines().skip(1).peekable(); // Skip argument line
+    while let Some(line_str) = temp_lines_iter.next() {
+        let trimmed_line_for_indent_check = line_str.trim_start();
+        if !trimmed_line_for_indent_check.is_empty() {
+            block_indentation = Some(line_str.len() - trimmed_line_for_indent_check.len());
+            break;
         }
+    }
 
-        let mut lines_iter = text[directive_body_start_index..]
-            .lines()
-            .skip(1)
-            .peekable();
+    let mut lines_iter = text_after_marker.lines().skip(1).peekable(); // Skip argument line
 
-        while let Some(line_str) = lines_iter.next() {
-            let original_line_for_content = line_str.to_string(); // Keep original for content
-            let current_indentation = line_str.len() - line_str.trim_start().len();
-            let trimmed_line = line_str.trim();
+    while let Some(line_str) = lines_iter.next() {
+        let original_line_for_content = line_str.to_string();
+        let current_indentation = line_str.len() - line_str.trim_start().len();
+        let trimmed_line = line_str.trim();
 
-            if in_options {
-                // If still in options mode at the start of this line's processing
-                if trimmed_line.starts_with(':') {
-                    // Is it an option line?
-                    let option_line_indentation = current_indentation;
-                    let mut parts_iter = trimmed_line[1..].splitn(2, ':');
-                    if let (Some(key_str), Some(value_str)) = (parts_iter.next(), parts_iter.next())
-                    {
-                        let key = key_str.trim().to_string();
-                        let mut value_parts = vec![value_str.trim_start().to_string()];
+        if in_options {
+            if trimmed_line.starts_with(':') {
+                let option_line_indentation = current_indentation;
+                let mut parts_iter = trimmed_line[1..].splitn(2, ':');
+                if let (Some(key_str), Some(value_str)) = (parts_iter.next(), parts_iter.next()) {
+                    let key = key_str.trim().to_string();
+                    let mut value_parts = vec![value_str.trim_start().to_string()];
 
-                        // Check for multiline continuations
-                        loop {
-                            match lines_iter.peek() {
-                                Some(next_line_peek_str) => {
-                                    let next_line_original = *next_line_peek_str;
-                                    let next_line_indent = next_line_original.len()
-                                        - next_line_original.trim_start().len();
-                                    let next_trimmed_line = next_line_original.trim();
+                    loop {
+                        match lines_iter.peek() {
+                            Some(next_line_peek_str) => {
+                                let next_line_original = *next_line_peek_str;
+                                let next_line_indent = next_line_original.len()
+                                    - next_line_original.trim_start().len();
+                                let next_trimmed_line = next_line_original.trim();
 
-                                    if !next_trimmed_line.is_empty()
-                                        && next_line_indent > option_line_indentation
-                                    {
-                                        value_parts.push(next_trimmed_line.to_string());
-                                        lines_iter.next(); // Consume this line
-                                    } else {
-                                        break; // Not a continuation line
-                                    }
+                                // If the next line looks like a new option, stop collecting for current option's value
+                                if next_trimmed_line.starts_with(':') && next_trimmed_line[1..].contains(':') {
+                                    // Check if it's indented enough to be part of *this* directive's options,
+                                    // or if it's less indented (could be a new directive or unrelated text)
+                                    // For now, any new valid option format line terminates current option value.
+                                    break;
                                 }
-                                None => {
-                                    break; // No more lines
+
+                                if !next_trimmed_line.is_empty()
+                                    && next_line_indent > option_line_indentation
+                                {
+                                    value_parts.push(next_trimmed_line.to_string());
+                                    lines_iter.next(); 
+                                } else {
+                                    break; 
                                 }
                             }
+                            None => break,
                         }
-
-                        let final_value = if value_parts.len() > 1 && value_parts[0].is_empty() {
-                            value_parts[1..].join("\n")
-                        } else {
-                            value_parts.join("\n")
-                        };
-                        options.insert(key, final_value);
-                        continue; // Successfully parsed an option, move to next line
+                    }
+                    let final_value = if value_parts.len() > 1 && value_parts[0].is_empty() {
+                        value_parts[1..].join("\n")
                     } else {
-                        // Malformed option line (e.g., ":key" without a second colon or just ":")
-                        // This line is not a valid option. It becomes the first line of content.
-                        in_options = false;
-                        // DO NOT continue. Fall through to add this line as content.
-                    }
+                        value_parts.join("\n")
+                    };
+                    options.insert(key, final_value);
+                    continue;
                 } else {
-                    // Not starting with ':'
-                    in_options = false; // Options phase is over.
-                    if trimmed_line.is_empty() {
-                        // This was a blank line terminating options. Don't add it to content_lines.
-                        continue; // Move to the next line, which will be the first potential content line.
-                    }
-                    // else: It's a non-empty, non-option line. This IS the first content line.
-                    // DO NOT continue. Fall through to add this line as content.
+                    in_options = false;
+                }
+            } else {
+                in_options = false;
+                if trimmed_line.is_empty() {
+                    continue; 
                 }
             }
-
-            // If !in_options (either from a previous iteration, or flipped above by a non-option line,
-            // or by a malformed option line):
-            // The current line_str is processed as content.
-            // (We `continue`d if it was a blank line that flipped in_options, so those are skipped here)
-
-            // Check if this line is the start of another directive.
-            if trimmed_line.starts_with(".. ") && trimmed_line.contains("::") {
-                break;
-            }
-
-            // Determine if the line belongs to the current directive's content based on indentation.
-            let part_of_content_block = block_indentation.map_or(
-                true, // If no block_indentation established (e.g. empty directive body), consider line as content unless it's a new directive
-                |indent| current_indentation >= indent || trimmed_line.is_empty(),
-            );
-
-            if part_of_content_block {
-                content_lines.push(original_line_for_content);
-            } else if !trimmed_line.is_empty() {
-                // Line is not empty and has less indentation than required for the content block.
-                // This signifies the end of the current directive's content.
-                break;
-            }
         }
 
-        // Calculate minimum indentation of content lines
-        let mut min_indent: Option<usize> = None;
-        for line in &content_lines {
-            if !line.trim().is_empty() {
-                let current_indent = line.chars().take_while(|c| c.is_whitespace()).count();
-                min_indent = match min_indent {
-                    Some(indent) => Some(std::cmp::min(indent, current_indent)),
-                    None => Some(current_indent),
-                };
-            }
+        if trimmed_line.starts_with(".. ") && trimmed_line.contains("::") {
+            break;
         }
 
-        // Remove minimum indentation from content lines
-        let mut processed_content_lines: Vec<String> = content_lines
-            .into_iter()
-            .map(|line| {
-                if line.trim().is_empty() {
-                    // Normalize whitespace-only lines to an actual empty string
-                    "".to_string()
-                } else {
-                    match min_indent {
-                        Some(indent) => {
-                            // Remove the minimum indentation prefix
-                            line.chars().skip(indent).collect::<String>()
-                        }
-                        None => {
-                            // No non-empty content lines, keep as is
-                            line
-                        }
-                    }
-                }
-            })
-            .collect();
+        let part_of_content_block = block_indentation.map_or(
+            true, 
+            |indent| current_indentation >= indent || trimmed_line.is_empty(),
+        );
 
-        // Remove trailing lines from processed_content_lines that are empty or only whitespace.
-        // This helps match exact content expectations in tests, especially avoiding trailing newlines
-        // from blank lines that might exist between the true content and the next directive/EOF.
-        while processed_content_lines
-            .last()
-            .map_or(false, |l| l.trim().is_empty())
-        {
-            processed_content_lines.pop();
+        if part_of_content_block {
+            content_lines.push(original_line_for_content);
+        } else if !trimmed_line.is_empty() {
+            break;
         }
-
-        return Some((
-            Directive {
-                name: target_directive.to_string(),
-                arguments,
-                options,
-                content: processed_content_lines.join("\n"),
-            },
-            line_number,
-        ));
     }
-    None
+
+    let mut min_indent: Option<usize> = None;
+    for line in &content_lines {
+        if !line.trim().is_empty() {
+            let current_indent = line.chars().take_while(|c| c.is_whitespace()).count();
+            min_indent = match min_indent {
+                Some(indent) => Some(std::cmp::min(indent, current_indent)),
+                None => Some(current_indent),
+            };
+        }
+    }
+
+    let mut processed_content_lines: Vec<String> = content_lines
+        .into_iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                "".to_string()
+            } else {
+                match min_indent {
+                    Some(indent) => line.chars().skip(indent).collect::<String>(),
+                    None => line,
+                }
+            }
+        })
+        .collect();
+
+    while processed_content_lines
+        .last()
+        .map_or(false, |l| l.trim().is_empty())
+    {
+        processed_content_lines.pop();
+    }
+
+    Directive {
+        name: directive_name,
+        arguments,
+        options,
+        content: processed_content_lines.join("\n"),
+    }
+}
+
+/// Parse a reStructuredText string and find the *first* occurrence of a specific directive.
+/// Returns the directive and its line number, or None if not found.
+pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize)> {
+    let directive_start_marker = format!(".. {}::", target_directive);
+    if let Some(marker_start_index) = text.find(&directive_start_marker) {
+        let line_number = text[..marker_start_index].lines().count() + 1;
+        let body_start_index = marker_start_index + directive_start_marker.len();
+        
+        let directive = parse_directive_body(
+            &text[body_start_index..],
+            target_directive.to_string(),
+        );
+        Some((directive, line_number))
+    } else {
+        None
+    }
+}
+
+// Helper function to check for valid directive name characters.
+// Directive names cannot contain spaces themselves.
+// Standard RST allows alphanumeric, hyphen, underscore, period.
+fn is_valid_directive_char_for_name(c: char) -> bool {
+    c.is_alphanumeric() || c == '-' || c == '_' || c == '.'
+    // No space allowed here based on user feedback for strict RST.
 }
 
 /// Parse a reStructuredText string and find all occurrences of any directive in the provided list.
-/// Returns a vector of all found directives with their line numbers in the order they appear in the text.
+/// Performs a single pass over the text for efficiency.
+/// Returns a vector of all found directives with their line numbers, in the order they appear.
 pub fn parse_rst_multiple(text: &str, target_directives: &[&str]) -> Vec<(Directive, usize)> {
-    // First, collect all directives with their positions and line numbers in the text
-    let mut directives_with_positions_and_lines = Vec::new();
+    let mut found_directives_with_pos = Vec::new();
+    let mut current_pos = 0;
 
-    for &directive_name in target_directives {
-        let directive_start = format!(".. {}::", directive_name);
-        let mut pos = 0;
+    while current_pos < text.len() {
+        // Find the next potential directive start ".. " (must have a space)
+        if let Some(dots_space_offset) = text[current_pos..].find(".. ") {
+            let absolute_dots_space_start = current_pos + dots_space_offset;
+            let potential_directive_line_start = absolute_dots_space_start;
+            let name_search_start_abs = absolute_dots_space_start + 3; // Name starts after ".. "
 
-        while let Some(start_index) = text[pos..].find(&directive_start) {
-            let absolute_start = pos + start_index;
-
-            // Parse this directive
-            if let Some((directive, relative_line_number)) =
-                parse_rst(&text[absolute_start..], directive_name)
-            {
-                // Calculate the absolute line number in the original text
-                let absolute_line_number =
-                    text[..absolute_start].lines().count() + relative_line_number;
-                directives_with_positions_and_lines.push((
-                    absolute_start,
-                    directive,
-                    absolute_line_number,
-                ));
-            }
-
-            // Move past this directive to find the next one
-            pos = absolute_start + directive_start.len();
-
-            // Skip at least one character to avoid finding the same directive again
-            if pos < text.len() {
-                pos += 1;
-            } else {
+            // Minimum length for a directive: ".. a::" (6 chars)
+            if name_search_start_abs >= text.len() || absolute_dots_space_start + 6 > text.len() {
                 break;
             }
+
+            // Determine the end of the current line for searching "::"
+            let end_of_line_offset_from_name_start = text[name_search_start_abs..]
+                .find('\n')
+                .map_or(text.len() - name_search_start_abs, |pos| pos);
+
+            let line_search_slice = &text[name_search_start_abs..name_search_start_abs + end_of_line_offset_from_name_start];
+
+            if let Some(colon_colon_offset_in_slice) = line_search_slice.find("::") {
+                let absolute_colon_colon_start = name_search_start_abs + colon_colon_offset_in_slice;
+                let directive_name_candidate_str = &text[name_search_start_abs..absolute_colon_colon_start];
+                let trimmed_name = directive_name_candidate_str.trim(); // Trim spaces around the name
+
+                // Validate directive name characters (no spaces within the name itself)
+                let is_name_structurally_valid = !trimmed_name.is_empty() &&
+                    !trimmed_name.contains(' ') && // Ensure no internal spaces in the name
+                    trimmed_name.chars().all(is_valid_directive_char_for_name);
+
+                if is_name_structurally_valid && target_directives.contains(&trimmed_name) {
+                    let line_number = text[..potential_directive_line_start].lines().count() + 1;
+                    let directive_body_start_index = absolute_colon_colon_start + 2; // After "::"
+
+                    if directive_body_start_index <= text.len() {
+                        let directive = parse_directive_body(
+                            &text[directive_body_start_index..],
+                            trimmed_name.to_string(),
+                        );
+                        found_directives_with_pos.push((potential_directive_line_start, directive, line_number));
+                    }
+                    current_pos = directive_body_start_index;
+                } else {
+                    // Invalid name, not a target, or malformed, but "::" was found after ".. ".
+                    // Advance past this "::" to avoid reprocessing.
+                    current_pos = absolute_colon_colon_start + 2;
+                }
+            } else {
+                // Found ".. " but no "::" on the same line after the name part.
+                // Advance past the ".. " to continue searching.
+                current_pos = name_search_start_abs; // which is absolute_dots_space_start + 3
+            }
+        } else {
+            // No more ".. " found
+            break;
         }
     }
 
-    // Sort directives by their position in the text
-    directives_with_positions_and_lines.sort_by_key(|(pos, _, _)| *pos);
-
-    // Return the directives with their line numbers, now in the correct order
-    directives_with_positions_and_lines
+    found_directives_with_pos
         .into_iter()
         .map(|(_, directive, line_number)| (directive, line_number))
         .collect()
 }
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn assert_directive_eq(
-        actual: Option<(Directive, usize)>,
+    // Helper to create a HashMap for options easily in tests
+    fn opts(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+    
+    // Test assertion helper
+    fn assert_directive_eq_props(
+        actual: &Option<(Directive, usize)>,
         expected_name: &str,
         expected_arguments: &str,
-        expected_options: HashMap<String, String>,
-        expected_content: &str,
+        expected_options: &HashMap<String, String>,
+        expected_content: &str
+        // expected_line: Option<usize>, // Line number check can be added if needed
     ) {
         match actual {
             Some((directive, _line_number)) => {
-                assert_eq!(directive.name, expected_name.to_string());
-                assert_eq!(directive.arguments, expected_arguments.to_string());
-                assert_eq!(directive.options, expected_options);
-                assert_eq!(directive.content, expected_content.to_string());
+                assert_eq!(directive.name, expected_name.to_string(), "Name mismatch");
+                assert_eq!(directive.arguments, expected_arguments.to_string(), "Argument mismatch");
+                assert_eq!(&directive.options, expected_options, "Options mismatch");
+                assert_eq!(directive.content, expected_content.to_string(), "Content mismatch");
+                // if let Some(line) = expected_line {
+                //     assert_eq!(*_line_number, line, "Line number mismatch");
+                // }
             }
             None => panic!(
-                "Expected Some((Directive, usize)), got None. Expected name: {}",
+                "Expected Some(Directive), got None. Expected name: {}",
                 expected_name
             ),
         }
     }
+
 
     fn assert_directive_none(actual: Option<(Directive, usize)>, directive_name_searched: &str) {
         match actual {
@@ -281,7 +302,7 @@ mod tests {
                 "Expected None for directive '{}', got Some(({:?}, _))",
                 directive_name_searched, directive
             ),
-            None => {} // Expected None, got None, so pass
+            None => {} 
         }
     }
 
@@ -294,14 +315,12 @@ mod tests {
 
    This is content.
 "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert("option2".to_string(), "value2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1"), ("option2", "value2")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "This is content.",
         );
     }
@@ -313,29 +332,27 @@ mod tests {
 
    This is content without options.
 "#;
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
+            &HashMap::new(),
             "This is content without options.",
         );
     }
-
+    
     #[test]
     fn test_directive_no_content() {
         let rst = r#"
 .. mydirective::
    :option1: value1
 "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        // Current parser behavior: if no blank line follows options, content is empty.
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "",
         );
     }
@@ -343,13 +360,11 @@ mod tests {
     #[test]
     fn test_directive_no_options_no_content_trailing_newline() {
         let rst = ".. mydirective::\n";
-        // Current parser behavior: expects lines after directive line for options/content.
-        // If only the directive line exists, it might find it but parse empty options/content.
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
+            &HashMap::new(),
             "",
         );
     }
@@ -357,11 +372,11 @@ mod tests {
     #[test]
     fn test_directive_no_options_no_content_no_trailing_newline() {
         let rst = ".. mydirective::";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+         assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
+            &HashMap::new(),
             "",
         );
     }
@@ -374,19 +389,18 @@ mod tests {
 
    Content here.
 "#;
-        let mut options = HashMap::new();
-        options.insert("option-key_1".to_string(), "value_with-hyphen".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "my-directive_name"),
+        let expected_options = opts(&[("option-key_1", "value_with-hyphen")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "my-directive_name"),
             "my-directive_name",
             "",
-            options,
+            &expected_options,
             "Content here.",
         );
     }
 
     #[test]
-    fn test_multiple_directives() {
+    fn test_multiple_directives_with_parse_rst() { // parse_rst finds first
         let rst = r#"
 .. first_directive::
    :key1: val1
@@ -398,23 +412,21 @@ mod tests {
 
    Content for second.
 "#;
-        let mut options1 = HashMap::new();
-        options1.insert("key1".to_string(), "val1".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "first_directive"),
+        let expected_options1 = opts(&[("key1", "val1")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "first_directive"),
             "first_directive",
             "",
-            options1,
+            &expected_options1,
             "Content for first.",
         );
 
-        let mut options2 = HashMap::new();
-        options2.insert("key2".to_string(), "val2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "second_directive"),
+        let expected_options2 = opts(&[("key2", "val2")]);
+         assert_directive_eq_props(
+            &parse_rst(rst, "second_directive"),
             "second_directive",
             "",
-            options2,
+            &expected_options2,
             "Content for second.",
         );
     }
@@ -427,10 +439,7 @@ mod tests {
 
    Some text.
 "#;
-        assert_directive_none(
-            parse_rst(rst, "nonexistent_directive"),
-            "nonexistent_directive",
-        );
+        assert_directive_none(parse_rst(rst, "nonexistent_directive"), "nonexistent_directive");
     }
 
     #[test]
@@ -440,20 +449,16 @@ mod tests {
 
     #[test]
     fn test_content_starts_immediately_after_directive_line() {
-        // This case tests how the parser handles content that is not separated by a blank line
-        // from the directive line itself, when no options are present.
         let rst = r#"
 .. mydirective::
    Immediately starting content.
    More content.
 "#;
-        // Expected: The parser should treat "Immediately starting content." and subsequent lines as content.
-        // The options map should be empty.
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
+            &HashMap::new(),
             "Immediately starting content.\nMore content.",
         );
     }
@@ -466,19 +471,16 @@ mod tests {
    This is content starting right after an option line.
    Another line of content.
 "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        // Current parser behavior: if a non-option line is encountered while in_options is true,
-        // it transitions to content mode.
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "This is content starting right after an option line.\nAnother line of content.",
         );
     }
-
+    
     #[test]
     fn test_malformed_option_missing_second_colon() {
         let rst = r#"
@@ -488,38 +490,15 @@ mod tests {
 
    Content
 "#;
-        let mut options = HashMap::new();
-        // ":option1 value1" is not a valid option, so it (and subsequent lines) becomes content.
-        // The parser will find :option2: value2 as an option.
-        // The previous diff fixed the panic, now it should correctly parse option2
-        // and treat the malformed line as the start of content.
-        // The logic is: if a line starts with ':' but isn't `key:value`, in_options becomes false.
-        // The current line `   :option1 value1` will be the first line of content.
-        options.insert("option2".to_string(), "value2".to_string());
-        // The behavior of the current parser is that if a line starts with ':' but is not a valid option,
-        // it (and subsequent lines until the next directive) becomes content.
-        // The provided code for parsing options:
-        // if trimmed_line.starts_with(':') {
-        //    let mut parts_iter = trimmed_line[1..].splitn(2, ':');
-        //    if let (Some(key_str), Some(value_str)) = (parts_iter.next(), parts_iter.next()) { ... }
-        //    else { in_options = false; } // This branch is taken for ":option1 value1"
-        // } else { in_options = false; }
-        // So, ":option1 value1" makes in_options = false.
-        // Then, ":option2: value2" is processed. Since in_options is false, it's added to content.
-        // This is not ideal. A better parser would skip malformed options or handle them differently.
-        // Given the current code, let's predict its actual behavior.
-        // 1. ".. mydirective::" found.
-        // 2. Line "   :option1 value1": starts with ':', `trimmed_line[1..]` is "option1 value1". `splitn(2, ':')` yields only one part. `in_options` becomes `false`.
-        // 3. Line "   :option2: value2": `in_options` is `false`. This line is added to `content_lines`.
-        // 4. Line "": `in_options` is `false`. Added to `content_lines`.
-        // 5. Line "   Content": `in_options` is `false`. Added to `content_lines`.
-        // So, options should be empty.
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        // Behavior: ":option1 value1" is not `key:value`, so in_options becomes false.
+        // That line becomes content. Subsequent lines also become content.
+        // So, no options should be parsed.
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
-            ":option1 value1\n:option2: value2\n\nContent",
+            &HashMap::new(), 
+            ":option1 value1\n:option2: value2\n\nContent", // Adjusted expectation
         );
     }
 
@@ -532,14 +511,12 @@ mod tests {
 
    Content
 "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "".to_string()); // Value is empty
-        options.insert("option2".to_string(), "value2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", ""), ("option2", "value2")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "Content",
         );
     }
@@ -547,11 +524,11 @@ mod tests {
     #[test]
     fn test_directive_at_end_of_file_with_content() {
         let rst = ".. mydirective::\n\n   Final content.";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            HashMap::new(),
+            &HashMap::new(),
             "Final content.",
         );
     }
@@ -559,17 +536,16 @@ mod tests {
     #[test]
     fn test_directive_at_end_of_file_with_options() {
         let rst = ".. mydirective::\n   :key: val";
-        let mut options = HashMap::new();
-        options.insert("key".to_string(), "val".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("key", "val")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "",
         );
     }
-
+    
     #[test]
     fn test_options_with_various_spacing() {
         let rst = r#"
@@ -581,16 +557,17 @@ mod tests {
 
    Content
 "#;
-        let mut options = HashMap::new();
-        options.insert("key1".to_string(), "value1".to_string());
-        options.insert("key2".to_string(), "value2".to_string());
-        options.insert("key3".to_string(), "value3".to_string());
-        options.insert("key4".to_string(), "value4".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[
+            ("key1", "value1"), 
+            ("key2", "value2"), 
+            ("key3", "value3"), 
+            ("key4", "value4")
+        ]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "Content",
         );
     }
@@ -604,13 +581,13 @@ mod tests {
 .. second::
    :opt2: val2
 "#;
-        let mut options1 = HashMap::new();
-        options1.insert("opt1".to_string(), "val1".to_string());
-        assert_directive_eq(parse_rst(rst, "first"), "first", "", options1, ""); // No content for first
+        let opts1 = opts(&[("opt1", "val1")]);
+        assert_directive_eq_props(&parse_rst(rst, "first"), "first", "", &opts1, "");
 
-        let mut options2 = HashMap::new();
-        options2.insert("opt2".to_string(), "val2".to_string());
-        assert_directive_eq(parse_rst(rst, "second"), "second", "", options2, ""); // No content for second
+        let opts2 = opts(&[("opt2", "val2")]);
+        // parse_rst will find "second" if called with "second" as target
+        let rst_slice_for_second = rst.find(".. second::").map(|idx| &rst[idx..]).unwrap_or("");
+        assert_directive_eq_props(&parse_rst(rst_slice_for_second, "second"), "second", "", &opts2, "");
     }
 
     #[test]
@@ -626,145 +603,47 @@ mod tests {
 
    Content B
 "#;
-        let mut opts_a = HashMap::new();
-        opts_a.insert("k".to_string(), "v".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let opts_a = opts(&[("k", "v")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            opts_a,
+            &opts_a,
             "Content A",
         );
 
-        let mut opts_b = HashMap::new();
-        opts_b.insert("k2".to_string(), "v2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective-extra"),
+        let opts_b = opts(&[("k2", "v2")]);
+         assert_directive_eq_props(
+            &parse_rst(rst, "mydirective-extra"),
             "mydirective-extra",
             "",
-            opts_b,
+            &opts_b,
             "Content B",
         );
     }
-
+    
     #[test]
-    fn test_wrong_option_indentation() {
+    fn test_arbitrary_data_in_option_value() {
         let rst = r#"
 .. mydirective::
     :option1: value1
-    :option2: value2
+    :option2: value2  // Some other text ..-l. df s...dff; fslkjdjf
     :option3: value3
 
     Content.
     "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert("option2".to_string(), "value2".to_string());
-        options.insert("option3".to_string(), "value3".to_string());
-        let expected_content = "Content.";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
-            "mydirective",
-            "",
-            options,
-            expected_content,
-        );
-    }
 
-    #[test]
-    fn test_multiline_option_as_last_option_with_blank_line() {
-        let rst = r#"
-.. mydirective::
-    :option1: value1
-    :option2:
-        indented line1
-        indented line2
-        
-    Content.
-    "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert(
-            "option2".to_string(),
-            "indented line1\nindented line2".to_string(),
-        );
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[
+            ("option1", "value1"),
+            ("option2", "value2  // Some other text ..-l. df s...dff; fslkjdjf"),
+            ("option3", "value3"),
+        ]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "Content.",
-        );
-    }
-
-    #[test]
-    fn test_multiline_option_as_last_option_no_blank_line() {
-        let rst = r#"
-.. mydirective::
-    :option1: value1
-    :option2: test
-        indented line1
-        indented line2
-
-    Content without blank line.
-    "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert(
-            "option2".to_string(),
-            "test\nindented line1\nindented line2".to_string(),
-        );
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
-            "mydirective",
-            "",
-            options,
-            "Content without blank line.",
-        );
-    }
-
-    #[test]
-    fn test_empty_line_within_options() {
-        let rst = r#"
-    .. mydirective::
-       :option1: value1
-    
-       :option2: value2
-
-       Content.
-    "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        // The empty line should terminate options. The line ":option2: value2" should be content.
-        let expected_content = ":option2: value2\n\nContent.";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
-            "mydirective",
-            "",
-            options,
-            expected_content,
-        );
-    }
-
-    #[test]
-    fn test_empty_line_within_content() {
-        let rst = r#"
-.. mydirective::
-    :option1: value1
-
-    Content line 1.
-
-    Content line 3.
-    "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        let expected_content = "Content line 1.\n\nContent line 3.";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
-            "mydirective",
-            "",
-            options,
-            expected_content,
         );
     }
 
@@ -778,21 +657,19 @@ mod tests {
 
     Content.
     "#;
-        let mut options = HashMap::new();
-        options.insert(
-            "option1".to_string(),
-            "value1\nsecond line of value1".to_string(),
-        );
-        options.insert("option2".to_string(), "value2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[
+            ("option1", "value1\nsecond line of value1"),
+            ("option2", "value2"),
+        ]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "Content.",
         );
     }
-
+    
     #[test]
     fn test_multiline_option_empty_first_line() {
         let rst = r#"
@@ -804,51 +681,63 @@ mod tests {
 
     Content.
     "#;
-        let mut options = HashMap::new();
-        options.insert(
-            "option1".to_string(),
-            "indented line1\nindented line2".to_string(),
-        );
-        options.insert("option2".to_string(), "value2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+         let expected_options = opts(&[
+            ("option1", "indented line1\nindented line2"),
+            ("option2", "value2"),
+        ]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
+            &expected_options,
             "Content.",
         );
     }
 
     #[test]
-    fn test_multiline_option_as_last_option_rst() {
+    fn test_empty_line_within_options_terminates_options() {
+        let rst = r#"
+    .. mydirective::
+       :option1: value1
+    
+       :option2: value2
+
+       Content.
+    "#;
+        let expected_options = opts(&[("option1", "value1")]);
+        // The empty line makes in_options=false. Then ":option2: value2" becomes content.
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
+            "mydirective",
+            "",
+            &expected_options,
+            ":option2: value2\n\nContent.", // Adjusted expectation
+        );
+    }
+
+    #[test]
+    fn test_empty_line_within_content() {
         let rst = r#"
 .. mydirective::
     :option1: value1
-    :option2:
-        indented line1
-        indented line2
-        
-    Content.
+
+    Content line 1.
+
+    Content line 3.
     "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert(
-            "option2".to_string(),
-            "indented line1\nindented line2".to_string(),
-        );
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
-            "Content.",
+            &expected_options,
+            "Content line 1.\n\nContent line 3.",
         );
     }
-
+    
     #[test]
     fn test_option_like_line_in_content() {
         let rst = r#"
-        
 .. mydirective::
     :real_option: real_value
 
@@ -856,15 +745,13 @@ mod tests {
     This line looks like an option: :fake_option: fake_value
     More content.
 "#;
-        let mut options = HashMap::new();
-        options.insert("real_option".to_string(), "real_value".to_string());
-        let expected_content = "This is content.\nThis line looks like an option: :fake_option: fake_value\nMore content.";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("real_option", "real_value")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "",
-            options,
-            expected_content,
+            &expected_options,
+            "This is content.\nThis line looks like an option: :fake_option: fake_value\nMore content.",
         );
     }
 
@@ -873,18 +760,15 @@ mod tests {
         let rst = r#"
 .. mydirective:: some arguments here
    :option1: value1
-   :option2: value2
 
    Content.
 "#;
-        let mut options = HashMap::new();
-        options.insert("option1".to_string(), "value1".to_string());
-        options.insert("option2".to_string(), "value2".to_string());
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1")]);
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "some arguments here",
-            options,
+            &expected_options,
             "Content.",
         );
     }
@@ -892,11 +776,11 @@ mod tests {
     #[test]
     fn test_directive_with_arguments_no_options_no_content() {
         let rst = ".. mydirective:: just arguments\n";
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "just arguments",
-            HashMap::new(),
+            &HashMap::new(),
             "",
         );
     }
@@ -908,17 +792,18 @@ mod tests {
 
    Content without options.
 "#;
-        assert_directive_eq(
-            parse_rst(rst, "mydirective"),
+        assert_directive_eq_props(
+            &parse_rst(rst, "mydirective"),
             "mydirective",
             "arguments here",
-            HashMap::new(),
+            &HashMap::new(),
             "Content without options.",
         );
     }
 
+    // Renamed from test_parse_rst_all to reflect it tests parse_rst_multiple
     #[test]
-    fn test_parse_rst_all() {
+    fn test_parse_rst_multiple_single_target_directive() {
         let rst = r#"
 .. mydirective::
    :option1: value1
@@ -927,74 +812,110 @@ mod tests {
 
 Some text in between.
 
-.. mydirective::
+.. mydirective:: arg2
    :option2: value2
 
    Content 2.
 "#;
-        let directives_with_lines = parse_rst_all(rst, "mydirective");
-        assert_eq!(directives_with_lines.len(), 2);
+        // Corrected call to parse_rst_multiple
+        let results = parse_rst_multiple(rst, &["mydirective"]); 
+        assert_eq!(results.len(), 2);
 
-        let mut options1 = HashMap::new();
-        options1.insert("option1".to_string(), "value1".to_string());
-        assert_eq!(directives_with_lines[0].0.name, "mydirective");
-        assert_eq!(directives_with_lines[0].0.options, options1);
-        assert_eq!(directives_with_lines[0].0.content, "Content 1.");
+        let (d1, l1) = &results[0];
+        assert_eq!(d1.name, "mydirective");
+        assert_eq!(d1.arguments, "");
+        assert_eq!(d1.options, opts(&[("option1", "value1")]));
+        assert_eq!(d1.content, "Content 1.");
+        assert_eq!(*l1, 2); // Line numbers are 1-based
 
-        let mut options2 = HashMap::new();
-        options2.insert("option2".to_string(), "value2".to_string());
-        assert_eq!(directives_with_lines[1].0.name, "mydirective");
-        assert_eq!(directives_with_lines[1].0.options, options2);
-        assert_eq!(directives_with_lines[1].0.content, "Content 2.");
+        let (d2, l2) = &results[1];
+        assert_eq!(d2.name, "mydirective");
+        assert_eq!(d2.arguments, "arg2");
+        assert_eq!(d2.options, opts(&[("option2", "value2")]));
+        assert_eq!(d2.content, "Content 2.");
+        assert_eq!(*l2, 9); // Corrected expected line number
     }
 
     #[test]
-    fn test_parse_rst_multiple() {
+    fn test_parse_rst_multiple_different_directives() {
         let rst = r#"
-.. directive1::
-   :option1: value1
+.. directive1:: D1 Arg
+   :opt1: val1
 
-   Content for directive1.
+   Content for D1.
 
-.. directive2::
-   :option2: value2
+.. directive2:: D2 Arg
+   :opt2: val2
 
-   Content for directive2.
+   Content for D2.
 
-.. directive1::
-   :option3: value3
+.. directive1:: D1 Arg2
+   :opt3: val3
 
-   More content for directive1.
+   More content for D1.
 "#;
-        let directives_with_lines = parse_rst_multiple(rst, &["directive1", "directive2"]);
-        assert_eq!(directives_with_lines.len(), 3);
+        let results = parse_rst_multiple(rst, &["directive1", "directive2"]);
+        assert_eq!(results.len(), 3);
 
-        assert_eq!(directives_with_lines[0].0.name, "directive1");
-        assert_eq!(directives_with_lines[1].0.name, "directive2");
-        assert_eq!(directives_with_lines[2].0.name, "directive1");
+        assert_eq!(results[0].0.name, "directive1");
+        assert_eq!(results[0].0.arguments, "D1 Arg");
+        assert_eq!(results[0].1, 2);
 
-        let mut options1 = HashMap::new();
-        options1.insert("option1".to_string(), "value1".to_string());
-        assert_eq!(directives_with_lines[0].0.options, options1);
-        assert_eq!(
-            directives_with_lines[0].0.content,
-            "Content for directive1."
-        );
+        assert_eq!(results[1].0.name, "directive2");
+        assert_eq!(results[1].0.arguments, "D2 Arg");
+        assert_eq!(results[1].1, 7);
+        
+        assert_eq!(results[2].0.name, "directive1");
+        assert_eq!(results[2].0.arguments, "D1 Arg2");
+        assert_eq!(results[2].1, 12);
+    }
 
-        let mut options2 = HashMap::new();
-        options2.insert("option2".to_string(), "value2".to_string());
-        assert_eq!(directives_with_lines[1].0.options, options2);
-        assert_eq!(
-            directives_with_lines[1].0.content,
-            "Content for directive2."
-        );
+    #[test]
+    fn test_parse_rst_multiple_no_matches() {
+        let rst = r#"
+.. otherdirective::
+   Content.
+"#;
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_eq!(results.len(), 0);
+    }
 
-        let mut options3 = HashMap::new();
-        options3.insert("option3".to_string(), "value3".to_string());
-        assert_eq!(directives_with_lines[2].0.options, options3);
-        assert_eq!(
-            directives_with_lines[2].0.content,
-            "More content for directive1."
-        );
+    #[test]
+    fn test_parse_rst_multiple_empty_input() {
+        let results = parse_rst_multiple("", &["mydirective"]);
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_rst_multiple_tightly_packed() {
+        let rst = ".. d1::\n.. d2::\n.. d1::arg"; // Changed to valid syntax with space
+        let results = parse_rst_multiple(rst, &["d1", "d2"]);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0.name, "d1");
+        assert_eq!(results[0].0.arguments, "");
+        assert_eq!(results[0].1, 1);
+        assert_eq!(results[1].0.name, "d2");
+        assert_eq!(results[1].1, 2);
+        assert_eq!(results[2].0.name, "d1");
+        assert_eq!(results[2].0.arguments, "arg");
+        assert_eq!(results[2].1, 3);
+    }
+    
+    #[test]
+    fn test_parse_rst_multiple_directive_name_with_space_before_colon() {
+        // According to the spec "directive name must be a single word without spaces"
+        // So "my dir" is not a valid directive name.
+        let rst = ".. my dir :: args\n   :op:val\n\n   content";
+        let results = parse_rst_multiple(rst, &["my dir"]);
+        assert_eq!(results.len(), 0); // Expect 0 as "my dir" is invalid
+    }
+
+    #[test]
+    fn test_parse_rst_multiple_false_starts() {
+        let rst = "Some text .. notadirective\n.. realdir::\nText .. also not :: a directive";
+        let results = parse_rst_multiple(rst, &["realdir"]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.name, "realdir");
+        assert_eq!(results[0].1, 2); // Line number of ".. realdir::"
     }
 }

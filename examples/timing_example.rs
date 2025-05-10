@@ -1,4 +1,4 @@
-use rstparser::parser::{parse_rst, parse_rst_all, parse_rst_multiple};
+use rstparser::parser::{parse_rst, parse_rst_multiple};
 use rstparser::timing::Timer;
 use rstparser::time_it;
 use rstparser::time_call;
@@ -71,8 +71,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let rst = create_rst_with_multiple_directives("mydirective", directive_count, 10);
         
         // Using the time_it macro
-        let _directives = time_it!(&format!("parse_rst_all (directive_count={})", directive_count), {
-            parse_rst_all(&rst, "mydirective")
+        let _directives = time_it!(&format!("parse_rst_multiple (directive_count={})", directive_count), {
+            parse_rst_multiple(&rst, &["mydirective"])
         });
     }
     println!();
@@ -115,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     
     // Time parsing all directives
     let timer = Timer::new("Parse all directives");
-    let directives = parse_rst_all(&content, "mydirective");
+    let directives = parse_rst_multiple(&content, &["mydirective"]);
     timer.report();
     
     println!("Found {} directives", directives.len());

@@ -2,20 +2,21 @@
 
 ## Current Work Focus
 
-- Finalizing the update of the memory bank based on project file review.
+- Fixing bugs in the `parse_rst_multiple` function within `src/parser.rs`.
 
 ## Recent Changes
 
-- Reviewed `Cargo.toml`, `src/main.rs`, and `src/lib.rs`.
-- Updated `.clinerules/memory-bank/techContext.md` with Rust edition, dependency versions, and benchmark details.
-- Updated `.clinerules/memory-bank/systemPatterns.md` to ensure accuracy based on reviewed source files; the existing content was largely correct and confirmed.
-- Reviewed `projectbrief.md` and `productContext.md`; confirmed they are consistent with the information from `Cargo.toml`, `src/main.rs`, and `src/lib.rs`, requiring no changes.
-- Reviewed `progress.md`; confirmed its "What Works" section is consistent with `src/main.rs`. Other sections remain "(To be filled)" as the reviewed files do not provide further details for them.
+- Refactored the `parse_rst_multiple` function in `src/parser.rs` to address two specific parsing bugs:
+    - Ensured directive names are validated for allowed characters and do not span newlines.
+    - Improved logic for advancing the parsing position (`current_pos`) to correctly handle `..` sequences that are not part of target directives, preventing premature skipping.
+- Introduced a helper function `is_valid_directive_name_char` in `src/parser.rs` to validate characters in directive names.
+- Previous work involved a full review and update of the memory bank based on project files.
 
 ## Next Steps
 
-- Confirm completion of the memory bank update task.
-- Await further instructions or tasks from the user.
+- Update `.clinerules/memory-bank/progress.md` to reflect the attempted bug fixes.
+- Run `cargo test` to verify that the changes in `src/parser.rs` have fixed the identified bugs and that all tests pass.
+- Based on test results, confirm task completion or address any new issues.
 
 ## Active Decisions and Considerations
 
