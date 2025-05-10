@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use rstparser::parser::{parse_rst, parse_rst_multiple};
+use rstparser::parser::parse_rst_multiple; // Removed unused parse_rst
 use std::collections::HashMap;
 
 // Helper function to create RST content with a single directive
@@ -77,7 +77,7 @@ fn bench_parse_rst(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("content_size", content_size),
             &rst,
-            |b, rst| b.iter(|| parse_rst(black_box(rst), black_box("mydirective"))),
+            |b, rst| b.iter(|| parse_rst_multiple(black_box(rst), black_box(&["mydirective"]))), // Changed to parse_rst_multiple
         );
     }
 

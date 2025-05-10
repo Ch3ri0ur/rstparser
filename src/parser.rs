@@ -204,7 +204,7 @@ pub fn parse_rst_multiple(text: &str, target_directives: &[&str]) -> Vec<(Direct
                     trimmed_name.chars().all(is_valid_directive_char_for_name);
 
                 if is_name_structurally_valid && target_directives.contains(&trimmed_name) {
-                    let line_number = text[..potential_directive_line_start].lines().count() + 1;
+                    let line_number = text[..potential_directive_line_start].matches('\n').count() + 1;
                     let directive_body_start_index = absolute_colon_colon_start + 2; // After "::"
 
                     if directive_body_start_index <= text.len() {
@@ -251,41 +251,29 @@ mod tests {
             .collect()
     }
     
-    // Test assertion helper
-    fn assert_directive_eq_props(
-        actual: &Option<(Directive, usize)>,
+    // Test assertion helper for a single expected directive
+    fn assert_single_directive_eq_props(
+        results: &Vec<(Directive, usize)>,
         expected_name: &str,
         expected_arguments: &str,
         expected_options: &HashMap<String, String>,
-        expected_content: &str
-        // expected_line: Option<usize>, // Line number check can be added if needed
+        expected_content: &str,
+        expected_line: Option<usize>,
     ) {
-        match actual {
-            Some((directive, _line_number)) => {
-                assert_eq!(directive.name, expected_name.to_string(), "Name mismatch");
-                assert_eq!(directive.arguments, expected_arguments.to_string(), "Argument mismatch");
-                assert_eq!(&directive.options, expected_options, "Options mismatch");
-                assert_eq!(directive.content, expected_content.to_string(), "Content mismatch");
-                // if let Some(line) = expected_line {
-                //     assert_eq!(*_line_number, line, "Line number mismatch");
-                // }
-            }
-            None => panic!(
-                "Expected Some(Directive), got None. Expected name: {}",
-                expected_name
-            ),
+        assert_eq!(results.len(), 1, "Expected 1 directive, found {}", results.len());
+        let (directive, line_number) = &results[0];
+        assert_eq!(directive.name, expected_name.to_string(), "Name mismatch");
+        assert_eq!(directive.arguments, expected_arguments.to_string(), "Argument mismatch");
+        assert_eq!(&directive.options, expected_options, "Options mismatch");
+        assert_eq!(directive.content, expected_content.to_string(), "Content mismatch");
+        if let Some(line) = expected_line {
+            assert_eq!(*line_number, line, "Line number mismatch");
         }
     }
 
-
-    fn assert_directive_none(actual: Option<(Directive, usize)>, directive_name_searched: &str) {
-        match actual {
-            Some((directive, _)) => panic!(
-                "Expected None for directive '{}', got Some(({:?}, _))",
-                directive_name_searched, directive
-            ),
-            None => {} 
-        }
+    // Test assertion helper for expecting no directives
+    fn assert_no_directives_found(results: &Vec<(Directive, usize)>, directive_name_searched: &str) {
+        assert!(results.is_empty(), "Expected no directives for '{}', found {} ({:?})", directive_name_searched, results.len(), results);
     }
 
     #[test]
@@ -298,12 +286,14 @@ mod tests {
    This is content.
 "#;
         let expected_options = opts(&[("option1", "value1"), ("option2", "value2")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "This is content.",
+            Some(2),
         );
     }
 
@@ -314,12 +304,14 @@ mod tests {
 
    This is content without options.
 "#;
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(),
             "This is content without options.",
+            Some(2),
         );
     }
     
@@ -330,36 +322,42 @@ mod tests {
    :option1: value1
 "#;
         let expected_options = opts(&[("option1", "value1")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "",
+            Some(2),
         );
     }
 
     #[test]
     fn test_directive_no_options_no_content_trailing_newline() {
         let rst = ".. mydirective::\n";
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(),
             "",
+            Some(1),
         );
     }
 
     #[test]
     fn test_directive_no_options_no_content_no_trailing_newline() {
         let rst = ".. mydirective::";
-         assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+         assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(),
             "",
+            Some(1),
         );
     }
 
@@ -372,17 +370,19 @@ mod tests {
    Content here.
 "#;
         let expected_options = opts(&[("option-key_1", "value_with-hyphen")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "my-directive_name"),
+        let results = parse_rst_multiple(rst, &["my-directive_name"]);
+        assert_single_directive_eq_props(
+            &results,
             "my-directive_name",
             "",
             &expected_options,
             "Content here.",
+            Some(2),
         );
     }
 
     #[test]
-    fn test_multiple_directives_with_parse_rst() { // parse_rst finds first
+    fn test_multiple_directives_with_parse_rst_multiple() { // Corrected test name
         let rst = r#"
 .. first_directive::
    :key1: val1
@@ -394,22 +394,26 @@ mod tests {
 
    Content for second.
 "#;
+        let results_first = parse_rst_multiple(rst, &["first_directive"]);
         let expected_options1 = opts(&[("key1", "val1")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "first_directive"),
+        assert_single_directive_eq_props(
+            &results_first,
             "first_directive",
             "",
             &expected_options1,
             "Content for first.",
+            Some(2),
         );
 
+        let results_second = parse_rst_multiple(rst, &["second_directive"]);
         let expected_options2 = opts(&[("key2", "val2")]);
-         assert_directive_eq_props(
-            &parse_rst(rst, "second_directive"),
+         assert_single_directive_eq_props(
+            &results_second,
             "second_directive",
             "",
             &expected_options2,
             "Content for second.",
+            Some(7), 
         );
     }
 
@@ -421,12 +425,14 @@ mod tests {
 
    Some text.
 "#;
-        assert_directive_none(parse_rst(rst, "nonexistent_directive"), "nonexistent_directive");
+        let results = parse_rst_multiple(rst, &["nonexistent_directive"]);
+        assert_no_directives_found(&results, "nonexistent_directive");
     }
 
     #[test]
     fn test_empty_input_string() {
-        assert_directive_none(parse_rst("", "anydirective"), "anydirective");
+        let results = parse_rst_multiple("", &["anydirective"]);
+        assert_no_directives_found(&results, "anydirective");
     }
 
     #[test]
@@ -436,12 +442,14 @@ mod tests {
    Immediately starting content.
    More content.
 "#;
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(),
             "Immediately starting content.\nMore content.",
+            Some(2),
         );
     }
 
@@ -454,12 +462,14 @@ mod tests {
    Another line of content.
 "#;
         let expected_options = opts(&[("option1", "value1")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "This is content starting right after an option line.\nAnother line of content.",
+            Some(2),
         );
     }
     
@@ -472,15 +482,14 @@ mod tests {
 
    Content
 "#;
-        // Behavior: ":option1 value1" is not `key:value`, so in_options becomes false.
-        // That line becomes content. Subsequent lines also become content.
-        // So, no options should be parsed.
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(), 
-            ":option1 value1\n:option2: value2\n\nContent", // Adjusted expectation
+            ":option1 value1\n:option2: value2\n\nContent", // Content parsing is greedy
+            Some(2),
         );
     }
 
@@ -494,24 +503,28 @@ mod tests {
    Content
 "#;
         let expected_options = opts(&[("option1", ""), ("option2", "value2")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "Content",
+            Some(2),
         );
     }
 
     #[test]
     fn test_directive_at_end_of_file_with_content() {
         let rst = ".. mydirective::\n\n   Final content.";
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &HashMap::new(),
             "Final content.",
+            Some(1),
         );
     }
 
@@ -519,12 +532,14 @@ mod tests {
     fn test_directive_at_end_of_file_with_options() {
         let rst = ".. mydirective::\n   :key: val";
         let expected_options = opts(&[("key", "val")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "",
+            Some(1),
         );
     }
     
@@ -545,12 +560,14 @@ mod tests {
             ("key3", "value3"), 
             ("key4", "value4")
         ]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "Content",
+            Some(2),
         );
     }
 
@@ -563,13 +580,13 @@ mod tests {
 .. second::
    :opt2: val2
 "#;
+        let results_first = parse_rst_multiple(rst, &["first"]);
         let opts1 = opts(&[("opt1", "val1")]);
-        assert_directive_eq_props(&parse_rst(rst, "first"), "first", "", &opts1, "");
+        assert_single_directive_eq_props(&results_first, "first", "", &opts1, "", Some(2));
 
+        let results_second = parse_rst_multiple(rst, &["second"]);
         let opts2 = opts(&[("opt2", "val2")]);
-        // parse_rst will find "second" if called with "second" as target
-        let rst_slice_for_second = rst.find(".. second::").map(|idx| &rst[idx..]).unwrap_or("");
-        assert_directive_eq_props(&parse_rst(rst_slice_for_second, "second"), "second", "", &opts2, "");
+        assert_single_directive_eq_props(&results_second, "second", "", &opts2, "", Some(5));
     }
 
     #[test]
@@ -585,22 +602,26 @@ mod tests {
 
    Content B
 "#;
+        let results_mydirective = parse_rst_multiple(rst, &["mydirective"]);
         let opts_a = opts(&[("k", "v")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        assert_single_directive_eq_props(
+            &results_mydirective,
             "mydirective",
             "",
             &opts_a,
             "Content A",
+            Some(2),
         );
 
+        let results_extra = parse_rst_multiple(rst, &["mydirective-extra"]);
         let opts_b = opts(&[("k2", "v2")]);
-         assert_directive_eq_props(
-            &parse_rst(rst, "mydirective-extra"),
+         assert_single_directive_eq_props(
+            &results_extra,
             "mydirective-extra",
             "",
             &opts_b,
             "Content B",
+            Some(7),
         );
     }
     
@@ -620,12 +641,14 @@ mod tests {
             ("option2", "value2  // Some other text ..-l. df s...dff; fslkjdjf"),
             ("option3", "value3"),
         ]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "Content.",
+            Some(2),
         );
     }
 
@@ -643,12 +666,14 @@ mod tests {
             ("option1", "value1\nsecond line of value1"),
             ("option2", "value2"),
         ]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "Content.",
+            Some(2),
         );
     }
     
@@ -667,12 +692,14 @@ mod tests {
             ("option1", "indented line1\nindented line2"),
             ("option2", "value2"),
         ]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
             "Content.",
+            Some(2),
         );
     }
 
@@ -687,13 +714,15 @@ mod tests {
        Content.
     "#;
         let expected_options = opts(&[("option1", "value1")]);
+        let results = parse_rst_multiple(rst, &["mydirective"]);
         // The empty line makes in_options=false. Then ":option2: value2" becomes content.
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
-            ":option2: value2\n\nContent.", // Adjusted expectation
+            ":option2: value2\n\nContent.", 
+            Some(2), // The parser correctly identifies this as line 2
         );
     }
 
@@ -707,13 +736,15 @@ mod tests {
 
     Content line 3.
     "#;
-        let expected_options = opts(&[("option1", "value1")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let expected_options = opts(&[("option1", "value1")]); // Corrected: options should be present
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
-            &expected_options,
-            "Content line 1.\n\nContent line 3.",
+            &expected_options, // Corrected: use actual expected options
+            "Content line 1.\n\nContent line 3.", // Corrected: expected content
+            Some(2),
         );
     }
     
@@ -728,12 +759,14 @@ mod tests {
     More content.
 "#;
         let expected_options = opts(&[("real_option", "real_value")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "",
             &expected_options,
-            "This is content.\nThis line looks like an option: :fake_option: fake_value\nMore content.",
+            "This is content.\nThis line looks like an option: :fake_option: fake_value\nMore content.", // Corrected: min_indent from content block is applied
+            Some(2),
         );
     }
 
@@ -746,24 +779,28 @@ mod tests {
    Content.
 "#;
         let expected_options = opts(&[("option1", "value1")]);
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "some arguments here",
             &expected_options,
             "Content.",
+            Some(2),
         );
     }
 
     #[test]
     fn test_directive_with_arguments_no_options_no_content() {
         let rst = ".. mydirective:: just arguments\n";
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "just arguments",
             &HashMap::new(),
             "",
+            Some(1),
         );
     }
 
@@ -774,12 +811,14 @@ mod tests {
 
    Content without options.
 "#;
-        assert_directive_eq_props(
-            &parse_rst(rst, "mydirective"),
+        let results = parse_rst_multiple(rst, &["mydirective"]);
+        assert_single_directive_eq_props(
+            &results,
             "mydirective",
             "arguments here",
             &HashMap::new(),
             "Content without options.",
+            Some(2),
         );
     }
 

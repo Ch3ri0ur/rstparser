@@ -2,49 +2,90 @@
 
 ## Current Work Focus
 
-- Validating and testing the fix for directive duplication in file watching mode. The primary cause (inconsistent path handling) has been addressed.
+- Implementation of the "directive functions" feature, starting with backlinks.
+- This involves creating new modules (`link_data.rs`, `directive_functions.rs`), modifying existing ones (`aggregator.rs`, `processor.rs`, `main.rs`, `lib.rs`), and adding configuration (`rstparser_links.toml`).
+- Ensuring the new functionality integrates with both normal and watch modes.
+- Addressing compiler errors that arose during implementation.
 
 ## Recent Changes
 
-- Added `notify` crate as a dependency in `Cargo.toml`.
-- Modified `src/main.rs` to include a `--watch` CLI flag.
-- Implemented initial file system event monitoring using `notify` in `src/main.rs`.
-- Restructured in-memory storage (`current_directives_with_source` in `src/main.rs`) from `Vec<DirectiveWithSource>` to `Arc<Mutex<HashMap<PathBuf, HashMap<String, aggregator::DirectiveWithSource>>>>`.
-- Implemented a unique ID generation strategy for directives: uses `:id:` option if present, otherwise a composite of file path, directive name, and line number.
-- Modified file event handling (Create, Modify, Remove) in `src/main.rs` to use the new map structure, ensuring directives are correctly updated or removed, thus preventing duplicates upon file modification.
-- Updated `src/aggregator.rs` with new methods (`aggregate_to_json_from_map`, `aggregate_map_to_json`) to work with the new data structure, and refactored existing aggregation logic into an internal helper.
-- Updated default file extensions in `src/main.rs` to `rst,py,cpp` to ensure correct processing of example files in watch mode.
-- Resolved a `unused_assignments` warning in `src/main.rs`.
-- Implemented consistent path canonicalization in `src/main.rs` for HashMap keys and internal path handling during initial scan and file events (Create, Modify, Remove) in watch mode. This resolves a bug where directives were duplicated due to mismatched path representations (e.g., relative vs. absolute).
-- Previous work involved fixing bugs in `src/parser.rs`.
+- **Previous Context (before current task):**
+    - Added `notify` crate for file watching.
+    - Modified `src/main.rs` for `--watch` flag and initial event monitoring.
+    - Restructured in-memory storage to `Arc<Mutex<HashMap<PathBuf, HashMap<String, aggregator::DirectiveWithSource>>>>`.
+    - Implemented unique ID generation and path canonicalization to prevent directive duplication in watch mode.
+    - Updated `src/aggregator.rs` for the new map structure.
+- **Current Task (Directive Functions - Backlinks):**
+    - Added `toml = "0.8"` dependency to `Cargo.toml`.
+    - Created `rstparser_links.toml` for link field configuration.
+    - Fixed numerous compiler errors in tests (`src/parser.rs`, `benches/parser_benchmarks.rs`, `examples/timing_example.rs`, `tests/test_cpp_py_extraction.rs`) by updating calls from an old `parse_rst` function to the current `parse_rst_multiple`.
+    - Created `src/link_data.rs`:
+        - Defined `LinkTypeConfig` and `LinkConfig` for TOML parsing.
+        - Defined `LinkNodeData` and `LinkGraph` for storing link relationships.
+        - Implemented `load_link_config` function.
+    - Created `src/directive_functions.rs`:
+        - Defined `DirectiveFunction` trait.
+        - Implemented `BacklinkFunction` to process links and update `LinkGraph`.
+        - Implemented `FunctionApplicator` to manage and apply directive functions.
+    - Modified `src/aggregator.rs`:
+        - Added `id: String` field to `DirectiveWithSource`.
+        - Introduced `DirectiveOutput` struct for serialization, which includes original options plus dynamically added backlink fields.
+        - Added `create_directive_outputs` helper to generate `Vec<DirectiveOutput>` using `LinkGraph`.
+        - Added `aggregate_to_json_from_map_with_links` and `aggregate_map_to_json_with_links` methods to use the `LinkGraph` for enriching output.
+        - Updated existing aggregation methods to use `DirectiveOutput` internally.
+        - Updated tests to reflect `id` field and `DirectiveOutput`.
+        - User fixed import paths for `link_data` module (changed from `crate::` to `rstparser::`).
+    - Modified `src/processor.rs`:
+        - Refactored `process_file` to handle path canonicalization and unique ID generation (using `:id:` option or fallback: canonical_path:name:line), populating `DirectiveWithSource.id` and `DirectiveWithSource.source_file` (as canonical path).
+        - Refactored `process_files` (for non-watch mode) to use the updated `process_file`.
+        - Added `process_file_watch` (returns `Vec<Arc<Mutex<DirectiveWithSource>>>` with IDs and canonical paths).
+        - Added `process_files_watch` (returns `HashMap<PathBuf, Vec<Arc<Mutex<DirectiveWithSource>>>>` for initial scan in watch mode).
+        - Updated tests to reflect new ID generation and `DirectiveWithSource` structure.
+        - Fixed error handling for `Send + Sync` in parallel processing.
+    - Modified `src/main.rs`:
+        - Added imports for `link_data` and `directive_functions`.
+        - Loads `LinkConfig` from `rstparser_links.toml`.
+        - Initializes `FunctionApplicator`.
+        - Initializes `LinkGraph`.
+        - Calls `function_applicator.apply_to_all()` after initial parsing (for both watch and non-watch modes) to populate the `LinkGraph`.
+        - Modified calls to aggregator to use new `_with_links` methods, passing the `LinkGraph`.
+        - Adapted data structures and processing flow to align with changes in `Processor` and `Aggregator`.
+    - Modified `src/lib.rs` to make `link_data` and `directive_functions` modules public.
 
 ## Next Steps
 
-- Thoroughly test the file watching functionality with various scenarios (create, modify, delete files/directories with both relative and absolute paths, rapid changes) to confirm the path canonicalization fix robustly prevents directive duplication.
-- Update `.clinerules/memory-bank/progress.md` (completed).
-- Consider potential refinements like event debouncing or more efficient in-memory data structures for `current_directives_with_source` if performance issues arise with very large projects.
-- Confirm task completion.
+- **Immediate (Post-Reset):**
+    - Run `cargo check` and `cargo test` to confirm the project compiles and tests pass after the user's fix for `src/aggregator.rs` imports and the recent refactoring.
+    - If errors persist, address them.
+- **Backlink Feature Completion:**
+    - Refine incremental update logic for `LinkGraph` in `src/main.rs` (watch mode). Currently, it does a full recalculation via `apply_to_all`. This needs to be optimized to:
+        - Identify affected directives (sources of changed/deleted links, targets of changed/deleted links).
+        - Efficiently remove stale links from `LinkGraph`.
+        - Apply functions only to the necessary subset of directives.
+    - Thoroughly test backlink generation and updates in various scenarios (create, modify, delete files/directories, changes to link fields, changes to target directive IDs, self-references, broken links).
+- **General:**
+    - Update `progress.md` to reflect the current state of the backlink feature.
+    - Consider performance implications of link processing, especially in watch mode.
 
 ## Active Decisions and Considerations
 
-- Ensuring all memory bank files are consistent with the information available from the project structure and source code.
-- Adhering to the structure and purpose of each memory bank file as defined in `.clinerules/cline-memory-bank.md`.
-- Avoiding speculation for sections where reviewed files do not provide explicit information (e.g., "What's Left to Build" in `progress.md`).
-- Decided to use a `HashMap` keyed by canonicalized `PathBuf` (for file) and then by a generated `DirectiveInstanceId` (String) to store `aggregator::DirectiveWithSource` objects. This ensures consistent keying for efficient updates and prevents duplication due to path representation differences.
-- The `DirectiveInstanceId` prioritizes a user-defined `:id:` field in directive options, falling back to a generated ID (canonical file path + name + line number).
-- Ensured that `DirectiveWithSource` structs stored in the map also use canonical path strings for their `source_file` field for consistency.
+- **Link Configuration**: Using `rstparser_links.toml` with a `[[links]]` array (each entry having a `name` field) to define linkable fields. Backlink fields are generated as `original_field_name_back`.
+- **Data Storage for Links**: A separate `LinkGraph` (`HashMap<DirectiveInstanceId, LinkNodeData>`) is used to store relationships, managed by an `Arc<Mutex<>>` in watch mode. `LinkNodeData` stores outgoing and incoming links.
+- **Output Enrichment**: Backlink information is added to the `options` map of a temporary `DirectiveOutput` struct during serialization, not directly to `DirectiveWithSource`.
+- **ID Generation**: Centralized in `Processor::process_file`, using `:id:` option or fallback (canonical_path:name:line).
+- **Path Canonicalization**: Handled in `Processor::process_file` to ensure consistent path representation.
+- **Error Handling**: Warnings for self-referential or broken links are printed to `eprintln`. Parallel processing errors in `Processor` are collected and returned.
 
 ## Important Patterns and Preferences
 
-- The memory bank is crucial for maintaining context between sessions.
-- Updates should be thorough and reflect the current state accurately based on available information.
+- Modular design with clear responsibilities for parsing, processing, link management, and aggregation.
+- Incremental updates are a key long-term requirement.
+- Configuration via TOML file for link definitions.
 
 ## Learnings and Project Insights
 
-- The project is a reStructuredText (RST) parser implemented in Rust.
-- Key aspects include performance (benchmarks exist) and extensibility (custom directives in Python/C++).
-- The project includes a library and a CLI tool.
-- `main.rs` confirms the CLI argument structure (`clap`) and the orchestration of `FileWalker`, `Extractor`, `Parser`, `Processor`, and `Aggregator` modules.
-- `lib.rs` confirms the public API and re-exported modules.
-- The core functionality described in `progress.md` ("What Works") is validated by the structure observed in `main.rs`.
-- The change to a nested HashMap structure for `current_directives_with_source` is crucial for correct state management in watch mode, especially for updates.
+- The introduction of link processing significantly increases complexity, especially for state management in watch mode.
+- Careful management of borrows and mutability is crucial when dealing with shared data structures like `LinkGraph` and `current_directives_with_source`.
+- Path handling (canonicalization) and unique ID generation are fundamental for reliable directive tracking.
+- The `Processor` module is now responsible for preparing `DirectiveWithSource` instances with all necessary metadata (ID, canonical path).
+- The `Aggregator` is responsible for the final JSON output format, including enrichment with data from the `LinkGraph`.

@@ -265,8 +265,8 @@ fn test_multiline_option_as_last_option_in_cpp() {
     let raw_content = rstparser::extractor::RstExtractor::extract_from_cpp(cpp_content);
     
     // Manually parse the raw content to debug the issue
-    let parsed_result = rstparser::parser::parse_rst(&raw_content, "mydirective");
-    println!("Manually parsed options: {:?}", parsed_result.as_ref().map(|(d, _)| &d.options));
+    let parsed_results_vec = rstparser::parser::parse_rst_multiple(&raw_content, &["mydirective"]);
+    println!("Manually parsed options: {:?}", parsed_results_vec.first().map(|(d, _)| &d.options));
     
     // Check options
     assert_eq!(result[0].directive.options.get("option1").unwrap(), "value1");

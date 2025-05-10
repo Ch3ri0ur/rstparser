@@ -2,19 +2,6 @@
   {
     "directive": {
       "name": "mydirective",
-      "arguments": "arg1 arssg2ss",
-      "options": {
-        "option1": "value11dd2",
-        "option2": "value22312sssdasdsdffdf"
-      },
-      "content": "This is the content of the directive."
-    },
-    "source_file": "examples/customcpp.cpp",
-    "line_number": 1
-  },
-  {
-    "directive": {
-      "name": "mydirective",
       "arguments": "arg1 arg2",
       "options": {
         "option1": "value1asdasds22",
@@ -22,7 +9,7 @@
       },
       "content": "This is the content of the directive."
     },
-    "source_file": "examples/custom_directives.py",
+    "source_file": "/home/chris/work/rstparser/examples/custom_directives.py",
     "line_number": 1
   },
   {

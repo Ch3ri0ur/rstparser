@@ -1,4 +1,4 @@
-use rstparser::parser::{parse_rst, parse_rst_multiple};
+use rstparser::parser::parse_rst_multiple; // Removed unused parse_rst
 use rstparser::timing::Timer;
 use rstparser::time_it;
 use rstparser::time_call;
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let rst = create_rst_with_single_directive("mydirective", content_size);
         
         // Using the time_call macro
-        let _directive = time_call!(&format!("parse_rst (content_size={})", content_size), parse_rst, &rst, "mydirective");
+        let _directive = time_call!(&format!("parse_rst_multiple (single, content_size={})", content_size), parse_rst_multiple, &rst, &["mydirective"]);
     }
     println!();
     

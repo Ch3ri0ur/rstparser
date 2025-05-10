@@ -1,0 +1,23 @@
+# Configuration for RST directive link processing
+# Defines which directive fields should be treated as links.
+# The system will automatically create backlink fields on target directives
+# by appending "_back" to the original field name.
+
+[[links]]
+name = "derives"
+# Example: A directive with "derives = foo" will attempt to create a "derives_back = [original_directive_id]"
+# field on the directive with id "foo".
+
+[[links]]
+name = "tests"
+# Example: "tests = bar, baz" will attempt to create "tests_back" fields on "bar" and "baz".
+
+[[links]]
+name = "implements"
+
+[[links]]
+name = "related_to"
+
+# Add more link types as needed, following the same structure:
+# [[links]]
+# name = "your_link_field_name"

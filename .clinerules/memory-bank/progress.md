@@ -2,42 +2,72 @@
 
 ## What Works
 
-- File crawling
-- Extracting rst from cpp, py and rst files
-- parsing the rst for known directives.
-- aggregating the data into JSON files
-- Basic file watching mode (`--watch` flag) implemented:
-    - Initial scan and processing of files on startup, now correctly handling `.rst`, `.py`, and `.cpp` files by default.
-    - Monitors for file creation, modification, and deletion events using the `notify` crate for configured extensions.
-    - Re-parses affected files and updates an in-memory representation of directives using a unique ID system to prevent duplicates on modification.
-    - Re-aggregates and writes updated JSON output files.
+- File crawling.
+- Extracting RST from C++, Python, and RST files.
+- Parsing RST for known directives.
+- Aggregating data into JSON files.
+- Basic file watching mode (`--watch` flag):
+    - Initial scan and processing.
+    - Monitors file events (create, modify, delete).
+    - Re-parses affected files and updates in-memory directive storage.
+    - Uses unique ID generation (user-defined `:id:` or fallback `canonical_path:name:line`) and path canonicalization to prevent directive duplication.
+    - Re-aggregates and writes updated JSON output.
+- **Initial implementation of Directive Functions (Backlinks):**
+    - `toml` dependency added for configuration.
+    - `rstparser_links.toml` created for defining linkable fields.
+    - `src/link_data.rs` module:
+        - Defines `LinkConfig`, `LinkTypeConfig` for TOML parsing.
+        - Defines `LinkGraph`, `LinkNodeData` for storing link relationships.
+        - `load_link_config` function implemented.
+    - `src/directive_functions.rs` module:
+        - `DirectiveFunction` trait and `FunctionApplicator` struct.
+        - `BacklinkFunction` implementation to populate `LinkGraph`.
+    - `src/aggregator.rs` updated:
+        - `DirectiveWithSource` includes an `id: String` field.
+        - `DirectiveOutput` struct for enriched JSON serialization.
+        - Methods like `aggregate_map_to_json_with_links` use `LinkGraph` to add backlink fields (e.g., `fieldname_back`) to `DirectiveOutput.options`.
+    - `src/processor.rs` refactored:
+        - `process_file` now handles path canonicalization and populates `DirectiveWithSource.id` and canonical `source_file`.
+        - `process_file_watch` and `process_files_watch` added for watch mode, returning data structures with `Arc<Mutex<DirectiveWithSource>>`.
+    - `src/main.rs` updated:
+        - Loads link configuration.
+        - Initializes `FunctionApplicator` and `LinkGraph`.
+        - Calls `function_applicator.apply_to_all()` after initial parsing to populate `LinkGraph`.
+        - Uses new aggregator methods that accept the `LinkGraph`.
+    - Compiler errors related to old `parse_rst` function in tests and examples fixed.
+    - Import paths for `link_data` in `src/aggregator.rs` fixed by the user.
 
 ## What's Left to Build
 
-- Thorough testing of file watching functionality under various scenarios.
-- Potential performance optimizations for watch mode (e.g., event debouncing, more efficient data structures for large projects if needed).
-- (Other future features as per projectbrief.md)
+- **Backlink Feature - Incremental Updates (Watch Mode):**
+    - The current implementation in watch mode re-calculates the entire `LinkGraph` via `apply_to_all` on every change. This needs to be optimized for performance by implementing true incremental updates to the `LinkGraph`. This involves:
+        - Identifying only the directly changed directives and those affected by link changes (sources/targets of added/modified/deleted links).
+        - Efficiently removing stale links from `LinkGraph`.
+        - Applying directive functions only to the necessary subset of directives.
+- **Thorough Testing:**
+    - Comprehensive testing of backlink generation and updates in various scenarios (create, modify, delete files/directories, changes to link fields, changes to target directive IDs, self-references, broken links), especially in watch mode after incremental updates are implemented.
+    - Testing of existing file watching functionality under various scenarios.
+- **Performance Optimizations:**
+    - For watch mode event debouncing.
+    - For `LinkGraph` updates and queries if performance issues arise with very large projects.
+- (Other future features as per projectbrief.md, e.g., inheritance function).
 
 ## Current Status
 
-- Implemented initial version of file watching and incremental update functionality in `src/main.rs`.
-- Resolved build errors related to type mismatches and borrow checker issues in the file watching logic within `src/main.rs`.
-- Refactored in-memory directive storage in `src/main.rs` to use a nested `HashMap` structure (`HashMap<PathBuf, HashMap<String, aggregator::DirectiveWithSource>>`) for efficient updates and to prevent directive duplication in watch mode.
-- Implemented a unique ID generation for directives (preferring `:id:` option, falling back to file/name/line).
-- Updated `src/aggregator.rs` to support the new in-memory data structure.
-- The project now builds successfully with these enhancements to the file watching feature.
-- Default file extensions for scanning and watching updated in `src/main.rs` to include `rst,py,cpp`, resolving an issue where example files were not processed correctly in watch mode.
-- Updated `Cargo.toml` with the `notify` dependency.
-- Addressed a bug in watch mode where original directives were duplicated after file changes due to inconsistent path representations; fixed by implementing consistent path canonicalization in `src/main.rs` for in-memory directive storage and event processing.
-- Memory bank files (`activeContext.md`, `progress.md`) are being updated to reflect these changes.
+- Core infrastructure for directive functions and backlink processing is in place.
+- Backlinks are generated correctly during initial scans (both watch and non-watch modes).
+- Watch mode re-aggregates with updated backlinks, but link processing is a full recalculation.
+- Project compiles successfully after recent changes and fixes.
 
 ## Known Issues
 
-- The file watching functionality has been improved by addressing a key directive duplication bug. However, it is still new and requires comprehensive testing across various scenarios (create, modify, delete files/directories, rapid changes) to ensure full robustness.
+- **Performance of Link Updates in Watch Mode**: Full recalculation of `LinkGraph` on each change is not scalable.
 - Potential for multiple event triggers for single file operations (may need debouncing in future).
-- Performance with very large numbers of files/directives in watch mode has not been benchmarked.
-- Previously identified bugs in `parse_rst_multiple` were addressed; their status is now considered resolved unless new issues arise from testing.
+- Performance with very large numbers of files/directives in watch mode (especially with link processing) has not been benchmarked.
 
 ## Evolution of Project Decisions
 
-- (To be filled)
+- Decided to use a separate `LinkGraph` (HashMap) to store link relationships, managed by an `Arc<Mutex<>>` in watch mode.
+- Backlink information is added to a temporary `DirectiveOutput` struct during serialization, rather than directly modifying `DirectiveWithSource`'s options field permanently.
+- ID generation and path canonicalization are centralized in the `Processor` module.
+- Link field types are configured via `rstparser_links.toml`.
