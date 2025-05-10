@@ -200,45 +200,6 @@ pub fn parse_rst(text: &str, target_directive: &str) -> Option<(Directive, usize
     None
 }
 
-/// Parse a reStructuredText string and find all occurrences of a specific directive.
-/// Returns a vector of all found directives with their line numbers.
-pub fn parse_rst_all(text: &str, target_directive: &str) -> Vec<(Directive, usize)> {
-    let mut directives_with_line_numbers = Vec::new();
-    let mut current_pos = 0;
-    let text_len = text.len();
-
-    while current_pos < text_len {
-        let search_text = &text[current_pos..];
-        match parse_rst(search_text, target_directive) {
-            Some((directive, line_number)) => {
-                // Adjust line number to be relative to the original text
-                let adjusted_line_number = text[..current_pos].lines().count() + line_number;
-                directives_with_line_numbers.push((directive.clone(), adjusted_line_number));
-
-                // Find the end of this directive to continue search
-                let directive_start = format!(".. {}::", target_directive);
-                if let Some(start_index) = search_text.find(&directive_start) {
-                    // Move past this directive to avoid finding it again
-                    // We need to move past the directive marker and then find the next directive marker
-                    // or the end of the text
-                    current_pos += start_index + directive_start.len();
-
-                    // Skip at least one character to avoid finding the same directive again
-                    if current_pos < text_len {
-                        current_pos += 1;
-                    }
-                } else {
-                    // This shouldn't happen since we just found a directive, but just in case
-                    break;
-                }
-            }
-            None => break,
-        }
-    }
-
-    directives_with_line_numbers
-}
-
 /// Parse a reStructuredText string and find all occurrences of any directive in the provided list.
 /// Returns a vector of all found directives with their line numbers in the order they appear in the text.
 pub fn parse_rst_multiple(text: &str, target_directives: &[&str]) -> Vec<(Directive, usize)> {
