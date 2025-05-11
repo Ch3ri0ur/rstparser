@@ -1,28 +1,71 @@
 [
   {
-    "directive": {
-      "name": "mydirective",
-      "arguments": "arg1 arg2",
-      "options": {
-        "option1": "value1asdasds22",
-        "option2": "value2"
-      },
-      "content": "This is the content of the directive."
+    "name": "mydirective",
+    "arguments": "arg1 arg2",
+    "options": {
+      "option2": "value2",
+      "option1": "value1asdasds22"
     },
+    "content": "This is the content of the directive.",
     "source_file": "/home/chris/work/rstparser/examples/custom_directives.py",
-    "line_number": 1
+    "line_number": 1,
+    "id": "/home/chris/work/rstparser/examples/custom_directives.py:mydirective:1"
   },
   {
-    "directive": {
-      "name": "mydirective",
-      "arguments": "arg1 arssg2ssdddddd",
-      "options": {
-        "option2": "value22312sssdasdsdffdfsdfsdfasdasdsdfsd",
-        "option1": "value11dd2"
-      },
-      "content": "This is the content of the directive."
+    "name": "mydirective",
+    "arguments": "FeatureA",
+    "options": {
+      "related_to_back": "module_b_id",
+      "status": "implemented",
+      "derives": "interface_c_id",
+      "id": "feature_a_id",
+      "tests": "interface_c_id"
     },
+    "content": "This is Feature A. Testchange\nIt derives from Interface C and is tested by Interface C.",
+    "source_file": "/home/chris/work/rstparser/examples/test_feature_a.rst",
+    "line_number": 1,
+    "id": "feature_a_id"
+  },
+  {
+    "name": "mydirective",
+    "arguments": "InterfaceC",
+    "options": {
+      "implements": "module_b_id",
+      "id": "interface_c_id",
+      "tests_back": "feature_a_id",
+      "related_to_back": "module_b_id",
+      "derives_back": "feature_a_id",
+      "status": "planned"
+    },
+    "content": "This is Interface C.\nIt implements Module B.",
+    "source_file": "/home/chris/work/rstparser/examples/test_interface_c.rst",
+    "line_number": 1,
+    "id": "interface_c_id"
+  },
+  {
+    "name": "mydirective",
+    "arguments": "ModuleB",
+    "options": {
+      "related_to": "feature_a_id, interface_c_id",
+      "status": "in-progress",
+      "id": "module_b_id",
+      "implements_back": "interface_c_id"
+    },
+    "content": "This is Module B.\nIt is related to Feature A and Interface C.",
+    "source_file": "/home/chris/work/rstparser/examples/test_module_b.rst",
+    "line_number": 1,
+    "id": "module_b_id"
+  },
+  {
+    "name": "mydirective",
+    "arguments": "arg1 arssg2ssdddddd",
+    "options": {
+      "option1": "value11dd2",
+      "option2": "value22312sssdasdsdffdfsdfsdfasdasdsdfsd"
+    },
+    "content": "This is the content of the directive.",
     "source_file": "/home/chris/work/rstparser/examples/customcpp.cpp",
-    "line_number": 1
+    "line_number": 1,
+    "id": "/home/chris/work/rstparser/examples/customcpp.cpp:mydirective:1"
   }
 ]

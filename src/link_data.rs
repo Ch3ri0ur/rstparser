@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Represents the configuration for a single type of link field.
 /// Loaded from `rstparser_links.toml`.
@@ -49,5 +49,55 @@ pub fn load_link_config(path: &str) -> Result<LinkConfig, Box<dyn std::error::Er
             Ok(LinkConfig::default()) // Return default config if file not found
         }
         Err(e) => Err(Box::new(e)), // Propagate other errors
+    }
+}
+
+/// Removes all link information associated with the given `ids_to_remove`.
+/// This involves:
+/// 1. Removing these IDs from the `incoming_links` of any nodes they previously linked to.
+/// 2. Removing the entries for `ids_to_remove` themselves from the graph.
+pub fn remove_links_for_ids(graph: &mut LinkGraph, ids_to_remove: &HashSet<String>) {
+    // Phase 1: Collect information about which incoming links to update.
+    // Store as (target_id, backlink_field_name, id_of_source_to_remove_from_target's_incoming_list)
+    let mut incoming_link_updates_to_make: Vec<(String, String, String)> = Vec::new();
+
+    for removed_id in ids_to_remove {
+        if let Some(removed_node_data) = graph.get(removed_id) {
+            // For each outgoing link from the node being removed,
+            // find the target and record that this `removed_id` should be
+            // removed from the target's incoming links.
+            for (link_field_name, target_ids) in &removed_node_data.outgoing_links {
+                let backlink_field_name = format!("{}_back", link_field_name);
+                for target_id in target_ids {
+                    // Only update if the target itself is not being removed in this batch.
+                    if !ids_to_remove.contains(target_id) {
+                        incoming_link_updates_to_make.push((
+                            target_id.clone(),
+                            backlink_field_name.clone(),
+                            removed_id.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Perform the updates to incoming links.
+    for (target_id, backlink_field_name, source_to_remove) in incoming_link_updates_to_make {
+        if let Some(target_node_data) = graph.get_mut(&target_id) {
+            if let Some(incoming_sources) = target_node_data.incoming_links.get_mut(&backlink_field_name) {
+                incoming_sources.retain(|id| *id != source_to_remove);
+                if incoming_sources.is_empty() {
+                    target_node_data.incoming_links.remove(&backlink_field_name);
+                }
+            }
+        }
+    }
+
+    // Phase 2: Remove the specified directive nodes themselves from the graph.
+    // This handles removing their outgoing_links and any incoming_links pointing to them
+    // from other nodes that might also be in ids_to_remove.
+    for id_to_remove in ids_to_remove {
+        graph.remove(id_to_remove);
     }
 }

@@ -32,38 +32,44 @@
     - `src/main.rs` updated:
         - Loads link configuration.
         - Initializes `FunctionApplicator` and `LinkGraph`.
-        - Calls `function_applicator.apply_to_all()` after initial parsing to populate `LinkGraph`.
+        - Implemented incremental updates to `LinkGraph` in watch mode:
+            - Uses `link_data::remove_links_for_ids` to clear stale link data.
+            - Uses `FunctionApplicator::apply_to_subset` to reprocess only affected directives.
+            - Retains overall graph consistency by removing nodes for directives that no longer exist.
+        - Calls `function_applicator.apply_to_all()` for initial scan and non-watch mode.
         - Uses new aggregator methods that accept the `LinkGraph`.
     - Compiler errors related to old `parse_rst` function in tests and examples fixed.
     - Import paths for `link_data` in `src/aggregator.rs` fixed by the user.
+    - `src/link_data.rs` updated with `remove_links_for_ids` function.
+    - `src/directive_functions.rs` updated with `apply_to_subset` method in `FunctionApplicator`.
 
 ## What's Left to Build
 
-- **Backlink Feature - Incremental Updates (Watch Mode):**
-    - The current implementation in watch mode re-calculates the entire `LinkGraph` via `apply_to_all` on every change. This needs to be optimized for performance by implementing true incremental updates to the `LinkGraph`. This involves:
-        - Identifying only the directly changed directives and those affected by link changes (sources/targets of added/modified/deleted links).
-        - Efficiently removing stale links from `LinkGraph`.
-        - Applying directive functions only to the necessary subset of directives.
-- **Thorough Testing:**
-    - Comprehensive testing of backlink generation and updates in various scenarios (create, modify, delete files/directories, changes to link fields, changes to target directive IDs, self-references, broken links), especially in watch mode after incremental updates are implemented.
+- **Thorough Testing (Backlinks & Incremental Updates):**
+    - Comprehensive testing of backlink generation and incremental updates in various scenarios:
+        - File/directory creation, modification, deletion.
+        - Changes to link fields within directives.
+        - Changes to target directive IDs.
+        - Self-referential links and handling of broken links.
+        - Edge cases and concurrent modifications if possible.
     - Testing of existing file watching functionality under various scenarios.
 - **Performance Optimizations:**
-    - For watch mode event debouncing.
-    - For `LinkGraph` updates and queries if performance issues arise with very large projects.
+    - Benchmarking and optimization of incremental `LinkGraph` updates, especially with large numbers of directives and frequent changes.
+    - For watch mode event debouncing (if identified as an issue).
 - (Other future features as per projectbrief.md, e.g., inheritance function).
 
 ## Current Status
 
 - Core infrastructure for directive functions and backlink processing is in place.
 - Backlinks are generated correctly during initial scans (both watch and non-watch modes).
-- Watch mode re-aggregates with updated backlinks, but link processing is a full recalculation.
-- Project compiles successfully after recent changes and fixes.
+- **Incremental updates for `LinkGraph` in watch mode are implemented.**
+    - Watch mode now attempts to update the `LinkGraph` by reprocessing only changed/affected directives rather than a full recalculation.
+- Project compiles successfully and all existing tests pass after recent changes.
 
 ## Known Issues
 
-- **Performance of Link Updates in Watch Mode**: Full recalculation of `LinkGraph` on each change is not scalable.
+- **Performance of Incremental Link Updates in Watch Mode**: While incremental logic is implemented, its performance under heavy load or with very complex link structures has not been thoroughly benchmarked.
 - Potential for multiple event triggers for single file operations (may need debouncing in future).
-- Performance with very large numbers of files/directives in watch mode (especially with link processing) has not been benchmarked.
 
 ## Evolution of Project Decisions
 

@@ -13,10 +13,10 @@ mod directive_functions;
 use crate::file_walker::FileWalker;
 use crate::processor::Processor;
 use crate::aggregator::{Aggregator, GroupBy, DirectiveWithSource};
-use crate::link_data::{load_link_config, LinkConfig, LinkGraph}; // Added
+use crate::link_data::{load_link_config, LinkConfig, LinkGraph, remove_links_for_ids}; // Added remove_links_for_ids
 use crate::directive_functions::FunctionApplicator; // Added
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet}; // Added HashSet
 use std::path::PathBuf;
 use std::process;
 use std::sync::{Arc, Mutex};
@@ -206,6 +206,10 @@ fn main() {
                         
                         let mut global_directives_map_guard = current_directives_with_source.lock().unwrap();
                         let mut link_graph_guard = link_graph_arc_watch.lock().unwrap();
+                        
+                        let mut ids_to_clear_from_graph = HashSet::new(); // IDs whose links need to be removed before reprocessing
+                        let mut arcs_for_subset_application: Vec<Arc<Mutex<DirectiveWithSource>>> = Vec::new();
+                        let mut affected_ids_for_neighbor_scan = HashSet::new(); // IDs that were modified or removed, to find their neighbors
 
                         match event.kind {
                             EventKind::Create(_) | EventKind::Modify(_) => {
@@ -219,13 +223,24 @@ fn main() {
                                             path_to_process_orig.clone()
                                         }
                                     };
-                                    // Reprocess the file to get new/updated directives
-                                    match processor.process_file_watch(&canonical_path) { // Assuming process_file_watch returns Vec<Arc<Mutex<Dws>>>
-                                        Ok(processed_directives_arcs) => {
+
+                                    // Collect old IDs from this file to clear their links and find neighbors
+                                    if let Some(old_file_directives) = global_directives_map_guard.get(&canonical_path) {
+                                        for old_id in old_file_directives.keys() {
+                                            ids_to_clear_from_graph.insert(old_id.clone());
+                                            affected_ids_for_neighbor_scan.insert(old_id.clone());
+                                        }
+                                    }
+                                    
+                                    match processor.process_file_watch(&canonical_path) {
+                                        Ok(processed_directives_arcs_for_file) => {
                                             let mut new_file_map = HashMap::new();
-                                            for dws_arc in processed_directives_arcs {
+                                            for dws_arc in processed_directives_arcs_for_file {
                                                 let dws_guard = dws_arc.lock().unwrap();
                                                 new_file_map.insert(dws_guard.id.clone(), dws_arc.clone());
+                                                arcs_for_subset_application.push(dws_arc.clone()); 
+                                                ids_to_clear_from_graph.insert(dws_guard.id.clone()); // Also clear new IDs in case they existed before with different content
+                                                affected_ids_for_neighbor_scan.insert(dws_guard.id.clone());
                                             }
                                             global_directives_map_guard.insert(canonical_path.clone(), new_file_map);
                                             changed_anything_globally = true;
@@ -240,16 +255,20 @@ fn main() {
                                 for removed_path_item_orig in &event.paths {
                                     let path_key_candidate = match std::fs::canonicalize(removed_path_item_orig) {
                                         Ok(p) => p,
-                                        Err(_) => removed_path_item_orig.clone(),
+                                        Err(_) => removed_path_item_orig.clone(), 
                                     };
-                                    // Remove exact path and any paths starting with it (for directories)
-                                    let keys_to_remove: Vec<PathBuf> = global_directives_map_guard.keys()
+                                    
+                                    let keys_to_remove_from_map: Vec<PathBuf> = global_directives_map_guard.keys()
                                         .filter(|k| **k == path_key_candidate || k.starts_with(&path_key_candidate))
                                         .cloned()
                                         .collect();
                                     
-                                    for key_to_remove in keys_to_remove {
-                                        if global_directives_map_guard.remove(&key_to_remove).is_some() {
+                                    for key_to_remove in keys_to_remove_from_map {
+                                        if let Some(removed_file_directives) = global_directives_map_guard.remove(&key_to_remove) {
+                                            for id in removed_file_directives.keys() {
+                                                ids_to_clear_from_graph.insert(id.clone());
+                                                affected_ids_for_neighbor_scan.insert(id.clone());
+                                            }
                                             println!("  Removed directives from cache for {}", key_to_remove.display());
                                             changed_anything_globally = true;
                                         }
@@ -260,12 +279,67 @@ fn main() {
                         }
 
                         if changed_anything_globally {
-                            println!("Re-applying directive functions after file event...");
-                            function_applicator.apply_to_all(&global_directives_map_guard, &mut link_graph_guard);
-                            println!("Directive functions re-applied. Link graph has {} entries.", link_graph_guard.len());
+                            // Find neighbors of affected IDs (those that linked TO or were targeted BY affected_ids_for_neighbor_scan)
+                            // This scan must happen BEFORE clearing links from the graph.
+                            let mut neighbor_arcs_to_reprocess: HashMap<String, Arc<Mutex<DirectiveWithSource>>> = HashMap::new();
+                            if !affected_ids_for_neighbor_scan.is_empty() {
+                                println!("Scanning for neighbors of {} affected/removed IDs...", affected_ids_for_neighbor_scan.len());
+                                for (source_id, node_data) in link_graph_guard.iter() {
+                                    // Check if this source_id is one of the directly affected ones (already in arcs_for_subset_application or to be removed)
+                                    // If not, check its links.
+                                    if !affected_ids_for_neighbor_scan.contains(source_id) {
+                                        for targets in node_data.outgoing_links.values() {
+                                            if targets.iter().any(|target_id| affected_ids_for_neighbor_scan.contains(target_id)) {
+                                                // This source_id links to an affected ID. It needs reprocessing.
+                                                // Find its Arc<Mutex<Dws>> from global_directives_map_guard
+                                                for file_map in global_directives_map_guard.values() {
+                                                    if let Some(arc) = file_map.get(source_id) {
+                                                        neighbor_arcs_to_reprocess.insert(source_id.clone(), arc.clone());
+                                                        break;
+                                                    }
+                                                }
+                                                break; // Found a reason to reprocess this source_id, move to next in graph
+                                            }
+                                        }
+                                    }
+                                }
+                                // Also, directives that were targets of affected_ids_for_neighbor_scan might need reprocessing
+                                // if their incoming links are their only reason for being in the graph or having certain data.
+                                // However, apply_to_subset on the sources should update their incoming links.
+                                // The main concern is if a neighbor's *only* connection was to a now-deleted/changed node.
+                                // The `remove_links_for_ids` and subsequent `apply_to_subset` should handle this.
+                            }
+                            
+                            // Add collected neighbors to the main list for subset application, avoiding duplicates
+                            for (id, arc) in neighbor_arcs_to_reprocess {
+                                if !arcs_for_subset_application.iter().any(|a| a.lock().unwrap().id == id) {
+                                    arcs_for_subset_application.push(arc);
+                                }
+                            }
+
+
+                            if !ids_to_clear_from_graph.is_empty() {
+                                println!("Clearing links for {} directive IDs from graph...", ids_to_clear_from_graph.len());
+                                remove_links_for_ids(&mut link_graph_guard, &ids_to_clear_from_graph);
+                            }
+
+                            if !arcs_for_subset_application.is_empty() {
+                                println!("Re-applying directive functions to {} directives (modified + neighbors)...", arcs_for_subset_application.len());
+                                function_applicator.apply_to_subset(&arcs_for_subset_application, &global_directives_map_guard, &mut link_graph_guard);
+                            }
+                            
+                            // Final cleanup: remove any LinkGraph nodes for directives that no longer exist in global_directives_map_guard
+                            let mut still_valid_directive_ids = HashSet::new();
+                            for file_directives in global_directives_map_guard.values() {
+                                for id in file_directives.keys() {
+                                    still_valid_directive_ids.insert(id.clone());
+                                }
+                            }
+                            link_graph_guard.retain(|id, _| still_valid_directive_ids.contains(id));
+                            println!("Directive functions updated. Link graph has {} entries.", link_graph_guard.len());
                         }
                         
-                        drop(link_graph_guard); // Release before aggregator
+                        drop(link_graph_guard); 
                         drop(global_directives_map_guard); // Release before aggregator
 
                         if changed_anything_globally {

@@ -1,6 +1,6 @@
 use crate::aggregator::DirectiveWithSource;
 use crate::link_data::{LinkConfig, LinkGraph};
-use std::collections::HashMap;
+use std::collections::HashMap; // Removed HashSet
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -184,6 +184,33 @@ impl FunctionApplicator {
                 // link_graph.entry(id.clone()).or_default(); 
                 self.apply_to_directive(id, &directive_data_guard, current_directives_map, link_graph);
             }
+        }
+    }
+
+    /// Applies all registered functions to a specific subset of directives.
+    /// This is intended for incremental updates where only some directives need reprocessing.
+    /// It assumes that any necessary cleanup of old links related to these directives
+    /// (e.g., using `link_data::remove_links_for_ids`) has been done beforehand if these
+    /// directives are being re-evaluated.
+    pub fn apply_to_subset(
+        &self,
+        directives_to_process: &[Arc<Mutex<DirectiveWithSource>>],
+        all_directives_map: &AllDirectivesMap, // Full map for contextual lookups by functions
+        link_graph: &mut LinkGraph,
+    ) {
+        for directive_arc in directives_to_process {
+            let directive_data_guard = directive_arc.lock().unwrap();
+            // apply_to_directive will call each function's apply method.
+            // For BacklinkFunction, its apply method will:
+            // 1. Ensure the node for directive_data_guard.id exists.
+            // 2. Clear its old outgoing links.
+            // 3. Rebuild its outgoing links and update incoming links on its targets.
+            self.apply_to_directive(
+                &directive_data_guard.id,
+                &directive_data_guard,
+                all_directives_map,
+                link_graph,
+            );
         }
     }
 }
